@@ -645,48 +645,189 @@
     p.appendChild(bars);
   }
 
+  /* ------------------------------------------------------ distribution map
+     Coastlines are Natural Earth 1:10m (tools/build-ph-map.js). Each CDFP island
+     token is tied to the Natural Earth polygons it names; a polygon is shaded by
+     the largest species count among the recorded tokens that cover it (Itbayat
+     lies inside both ITBAYAT and BATANES, for instance). */
+
+  var NS = 'http://www.w3.org/2000/svg';
+  function svgEl(tag, attrs, text) {
+    var n = document.createElementNS(NS, tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) { n.setAttribute(k, attrs[k]); });
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function titleCase(tok) {
+    return tok.toLowerCase().replace(/(^|[\s(’'-])([a-z])/g, function (m, a, b) { return a + b.toUpperCase(); })
+      .replace(/\bIsls\b/, 'Islands').replace(/^Ncr$/, 'NCR (Metro Manila)');
+  }
+  /* Sequential green, light to deep, on the square root of the share of the
+     family's top island, so one dominant island does not wash out the rest. */
+  var RAMP = [[214, 231, 214], [140, 188, 150], [63, 128, 92], [22, 74, 52]];
+  function rampColour(t) {
+    t = Math.max(0, Math.min(1, t));
+    var seg = Math.min(RAMP.length - 2, Math.floor(t * (RAMP.length - 1)));
+    var u = t * (RAMP.length - 1) - seg;
+    var a = RAMP[seg], b = RAMP[seg + 1];
+    return 'rgb(' + [0, 1, 2].map(function (i) { return Math.round(a[i] + (b[i] - a[i]) * u); }).join(',') + ')';
+  }
+
   function panelDistribution(p, f) {
     if (!f.islands.length) {
       p.appendChild(el('p', 'missing', 'CDFP records no island-level distribution for this family.'));
       return;
     }
-
-    var wrap = el('div', 'distwrap');
+    var M = DATA.map;
     var counts = {};
     f.islands.forEach(function (i) { counts[i.name] = i.count; });
     var max = f.islands[0].count || 1;
+    var shade = function (n) { return rampColour(Math.sqrt(n / max)); };
 
-    // map
-    var box = el('div', 'mapbox');
-    var ns = 'http://www.w3.org/2000/svg';
-    var svg = document.createElementNS(ns, 'svg');
-    svg.setAttribute('viewBox', DATA.map.viewBox);
-    svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label',
-      f.family + ' recorded from ' + f.island_count + ' islands or island groups');
-    Object.keys(DATA.map.shapes).forEach(function (name) {
-      var path = document.createElementNS(ns, 'path');
-      path.setAttribute('d', DATA.map.shapes[name]);
-      var n = counts[name];
-      path.setAttribute('class', 'isle' + (n ? ' on' : ''));
-      if (n) path.setAttribute('fill-opacity', String(0.32 + 0.68 * Math.sqrt(n / max)));
-      var t = document.createElementNS(ns, 'title');
-      t.textContent = name + (n ? ' — ' + n + ' ' + plural(n, 'species') : ' — not recorded');
-      path.appendChild(t);
-      svg.appendChild(path);
+    // which recorded tokens cover each polygon
+    var cover = {};
+    Object.keys(M.islands).forEach(function (tok) {
+      if (!counts[tok]) return;
+      M.islands[tok].forEach(function (pi) { (cover[pi] = cover[pi] || []).push(tok); });
     });
-    box.appendChild(svg);
+
+    var wrap = el('div', 'distwrap');
+    var fig = el('figure', 'mapfig');
+    var vb = M.viewBox.split(' ').map(Number), W = vb[2], H = vb[3];
+    var svg = svgEl('svg', { viewBox: M.viewBox, class: 'phmap', role: 'img',
+      'aria-label': f.family + ': map of the Philippines shading the islands CDFP records it from' });
+
+    var defs = svgEl('defs');
+    var sea = svgEl('radialGradient', { id: 'sea-grad', cx: '58%', cy: '42%', r: '80%' });
+    sea.appendChild(svgEl('stop', { offset: '0', 'stop-color': '#F3F6F2' }));
+    sea.appendChild(svgEl('stop', { offset: '1', 'stop-color': '#DDE7E2' }));
+    defs.appendChild(sea);
+    var sh = svgEl('filter', { id: 'land-shadow', x: '-10%', y: '-10%', width: '120%', height: '120%' });
+    sh.appendChild(svgEl('feDropShadow', { dx: '0', dy: '1', stdDeviation: '1.3', 'flood-color': '#294338', 'flood-opacity': '0.28' }));
+    defs.appendChild(sh);
+    svg.appendChild(defs);
+    svg.appendChild(svgEl('rect', { x: 0, y: 0, width: W, height: H, fill: 'url(#sea-grad)' }));
+
+    // graticule, every 2 degrees
+    var g = svgEl('g', { class: 'grat' });
+    M.graticule.lon.forEach(function (l) {
+      g.appendChild(svgEl('line', { x1: l[1], y1: 0, x2: l[1], y2: H }));
+      g.appendChild(svgEl('text', { x: l[1] + 3, y: H - 6 }, l[0] + '°E'));
+    });
+    M.graticule.lat.forEach(function (l) {
+      g.appendChild(svgEl('line', { x1: 0, y1: l[1], x2: W, y2: l[1] }));
+      g.appendChild(svgEl('text', { x: 5, y: l[1] - 3 }, l[0] + '°N'));
+    });
+    svg.appendChild(g);
+
+    // sea names (Natural Earth marine polygons)
+    var sg = svgEl('g', { class: 'seas' });
+    (M.seas || []).forEach(function (s) {
+      var big = s[3] <= 1;
+      var words = s[0].split(' ');
+      var first = words.length > 1 ? words.slice(0, -1).join(' ') : s[0];
+      var half = first.length * (big ? 4.6 : 3.9) + 6;             // rough half-width of the longer line
+      var x = Math.max(half + 30, Math.min(W - half - 6, s[1]));   // clear of the latitude labels
+      var t = svgEl('text', { x: x, y: s[2], class: big ? 'sea big' : 'sea', 'text-anchor': 'middle' });
+      if (words.length > 1) {
+        t.appendChild(svgEl('tspan', { x: x, dy: '-0.3em' }, first));
+        t.appendChild(svgEl('tspan', { x: x, dy: '1.2em' }, words[words.length - 1]));
+      } else t.textContent = s[0];
+      sg.appendChild(t);
+    });
+    svg.appendChild(sg);
+
+    // land: one silhouette, then the recorded polygons on top
+    var land = svgEl('g', { class: 'land', filter: 'url(#land-shadow)' });
+    land.appendChild(svgEl('path', { d: M.polys.join(''), class: 'base' }));
+    svg.appendChild(land);
+
+    var hits = svgEl('g', { class: 'hits' });
+    var hitPaths = {};
+    Object.keys(cover).forEach(function (pi) {
+      var toks = cover[pi].sort(function (a, b) { return counts[b] - counts[a]; });
+      var colour = shade(counts[toks[0]]);
+      var path = svgEl('path', { d: M.polys[pi], class: 'hit', fill: colour, stroke: colour, 'data-toks': toks.join('|') });
+      hits.appendChild(path);
+      toks.forEach(function (t) { (hitPaths[t] = hitPaths[t] || []).push(path); });
+    });
+    svg.appendChild(hits);
+    // Focus: a translucent veil over the whole map, with the chosen island's
+    // polygons copied above it (dimming each polygon separately would show the
+    // province borders where neighbouring fills overlap).
+    var veil = svgEl('rect', { x: 0, y: 0, width: W, height: H, class: 'veil' });
+    svg.appendChild(veil);
+    var litLayer = svgEl('g', { class: 'litlayer' });
+    svg.appendChild(litLayer);
+    // the coastline on top: only edges that face the sea, so no province borders show
+    svg.appendChild(svgEl('path', { d: M.coast, class: 'coast' }));
+
+    // island names: the recorded islands big enough to carry a label, most species first
+    var lg = svgEl('g', { class: 'labels' });
+    var boxes = [];
+    Object.keys(counts).filter(function (t) { return M.labels[t] && M.labels[t][2] >= 16; })
+      .sort(function (a, b) { return counts[b] - counts[a] || M.labels[b][2] - M.labels[a][2]; })
+      .slice(0, 9)
+      .forEach(function (tok) {
+        var L = M.labels[tok], name = titleCase(tok).replace(' (Metro Manila)', '');
+        var w = name.length * 5.4 + 4, h = 12, bx = [L[0] - w / 2, L[1] - h / 2, L[0] + w / 2, L[1] + h / 2];
+        if (boxes.some(function (b) { return !(bx[2] < b[0] || bx[0] > b[2] || bx[3] < b[1] || bx[1] > b[3]); })) return;
+        boxes.push(bx);
+        var size = Math.max(10, Math.min(13.5, 8.5 + L[2] / 45));
+        lg.appendChild(svgEl('text', { x: L[0], y: L[1] + 4, 'text-anchor': 'middle', class: 'isle-name', 'font-size': size.toFixed(1) }, name));
+      });
+    svg.appendChild(lg);
+
+    // scale bar (0-100-200 km) and north arrow
+    var kmpx = M.km_per_px, len = 200 / kmpx, sx = W - len - 18, sy = H - 26;
+    var sc = svgEl('g', { class: 'scale' });
+    sc.appendChild(svgEl('rect', { x: sx, y: sy, width: len / 2, height: 4, class: 'dark' }));
+    sc.appendChild(svgEl('rect', { x: sx + len / 2, y: sy, width: len / 2, height: 4, class: 'light' }));
+    [[0, '0'], [len, '200 km']].forEach(function (s, i) {
+      sc.appendChild(svgEl('text', { x: sx + s[0], y: sy - 4, 'text-anchor': i ? 'end' : 'start' }, s[1]));
+    });
+    svg.appendChild(sc);
+    var na = svgEl('g', { class: 'north', transform: 'translate(' + (sx - 20) + ',' + (sy - 2) + ')' });
+    na.appendChild(svgEl('path', { d: 'M0 -13 L6 5 L0 1 L-6 5 Z' }));
+    na.appendChild(svgEl('text', { x: 0, y: 17, 'text-anchor': 'middle' }, 'N'));
+    svg.appendChild(na);
+    // a thin inner frame, as on a printed atlas plate
+    svg.appendChild(svgEl('rect', { x: 5.5, y: 5.5, width: W - 11, height: H - 11, class: 'neatline' }));
+
+    fig.appendChild(svg);
+
+    // hover card
+    var tip = el('div', 'maptip');
+    tip.hidden = true;
+    fig.appendChild(tip);
+
+    // legend
+    var leg = el('figcaption', 'maplegend');
+    var bar = el('div', 'ramp');
+    bar.style.background = 'linear-gradient(90deg,' + [0, 0.25, 0.5, 0.75, 1].map(rampColour).join(',') + ')';
+    var lrow = el('div', 'lrow');
+    var none = el('span', 'none');
+    none.appendChild(el('span', 'sw'));
+    none.appendChild(document.createTextNode('not recorded'));
+    lrow.appendChild(none);
+    var rr = el('span', 'rr');
+    rr.appendChild(el('span', 'lo', '1'));
+    rr.appendChild(bar);
+    rr.appendChild(el('span', 'hi', num(max) + ' ' + plural(max, 'species')));
+    lrow.appendChild(rr);
+    leg.appendChild(lrow);
     var placed = f.islands.filter(function (i) { return i.mapped; }).length;
-    box.appendChild(el('div', 'cap',
-      'Schematic. Shaded islands are those CDFP records for this family; depth of shade follows the species ' +
-      'count. ' + placed + ' of ' + f.islands.length + ' recorded ' +
-      plural(f.islands.length, 'island') + ' can be drawn here; every recorded island is listed by name.'));
-    wrap.appendChild(box);
+    leg.appendChild(el('p', 'mapnote',
+      'Shading follows the number of this family’s species CDFP records from each island. ' + placed + ' of ' +
+      f.islands.length + ' recorded ' + plural(f.islands.length, 'island') + ' can be drawn at this scale; ' +
+      'every one is listed by name. Coastlines: Natural Earth 1:10m, public domain.'));
+    fig.appendChild(leg);
+    wrap.appendChild(fig);
 
     // list
     var list = el('div', 'distlist');
     var lead = el('p', 'keyintro');
-    var top = f.islands.slice(0, 5).map(function (i) { return i.name.charAt(0) + i.name.slice(1).toLowerCase() + ' (' + i.count + ')'; });
+    var top = f.islands.slice(0, 5).map(function (i) { return titleCase(i.name) + ' (' + i.count + ')'; });
     lead.innerHTML = 'Recorded from <strong>' + f.island_count + '</strong> named ' +
       plural(f.island_count, 'island') + ' or island ' + plural(f.island_count, 'group') +
       (top.length ? '; most species are reported from ' + esc(sentence(top)) : '') + '.' +
@@ -697,21 +838,81 @@
     list.appendChild(lead);
 
     var set = el('div', 'chipset');
+    var chips = {};
     f.islands.forEach(function (i) {
-      var c = el('span', 'ichip');
-      c.appendChild(document.createTextNode(i.name.charAt(0) + i.name.slice(1).toLowerCase()));
+      var c = el(i.mapped ? 'button' : 'span', 'ichip' + (i.mapped ? ' mapped' : ''));
+      if (i.mapped) {
+        c.type = 'button';
+        var sw = el('span', 'sw');
+        sw.style.background = shade(i.count);
+        c.appendChild(sw);
+        c.setAttribute('aria-label', titleCase(i.name) + ', ' + i.count + ' ' + plural(i.count, 'species') + '. Show on map');
+      } else {
+        c.title = 'Too small to draw at this map scale';
+      }
+      c.appendChild(document.createTextNode(titleCase(i.name)));
       c.appendChild(el('span', 'n', String(i.count)));
       set.appendChild(c);
+      chips[i.name] = c;
     });
     list.appendChild(set);
+    var key = el('p', 'chipkey');
+    key.innerHTML = '<span class="sw"></span>on the map &nbsp;·&nbsp; <span class="dash">plain</span> too small to draw at this scale';
+    list.appendChild(key);
 
     var cap = el('div', 'srcline');
     cap.textContent = 'Island tokens are those CDFP prints in capitals in each species’ Distribution line. ' +
       'A species recorded from several islands is counted under each.';
     list.appendChild(cap);
     wrap.appendChild(list);
-
     p.appendChild(wrap);
+
+    // ---- linking map and list
+    function light(toks, on) {
+      svg.classList.toggle('focus', on);
+      litLayer.textContent = '';
+      toks.forEach(function (t) {
+        if (on) (hitPaths[t] || []).forEach(function (pth) { litLayer.appendChild(pth.cloneNode(false)); });
+        if (chips[t]) chips[t].classList.toggle('lit', on);
+      });
+    }
+    function showTip(toks, evt) {
+      tip.textContent = '';
+      toks.forEach(function (t) {
+        var row = el('div', 'row');
+        row.appendChild(el('span', 'nm', titleCase(t)));
+        row.appendChild(el('span', 'ct', counts[t] + ' ' + plural(counts[t], 'species')));
+        tip.appendChild(row);
+      });
+      tip.hidden = false;
+      var r = fig.getBoundingClientRect();
+      var x = evt.clientX - r.left, y = evt.clientY - r.top;
+      tip.style.left = Math.min(x + 14, r.width - tip.offsetWidth - 6) + 'px';
+      tip.style.top = Math.max(6, y - tip.offsetHeight - 10) + 'px';
+    }
+    var current = null;
+    function clear() { if (current) light(current, false); current = null; tip.hidden = true; }
+    svg.addEventListener('pointermove', function (e) {
+      var t = e.target.closest && e.target.closest('.hits .hit');
+      if (!t) { clear(); return; }
+      var toks = t.getAttribute('data-toks').split('|');
+      if (current && current.join() !== toks.join()) light(current, false);
+      current = toks; light(toks, true); showTip(toks, e);
+    });
+    svg.addEventListener('pointerleave', clear);
+    Object.keys(chips).forEach(function (tok) {
+      if (!hitPaths[tok]) return;
+      var c = chips[tok];
+      var on = function () { clear(); current = [tok]; light([tok], true); };
+      c.addEventListener('mouseenter', on);
+      c.addEventListener('focus', on);
+      c.addEventListener('mouseleave', clear);
+      c.addEventListener('blur', clear);
+      c.addEventListener('click', function () {
+        on();
+        if (window.matchMedia('(max-width: 900px)').matches) fig.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      });
+    });
   }
 
   /* CDFP prints categories in whatever order it happens to hold them; list
@@ -1053,7 +1254,8 @@
     section('Where the numbers come from', [
       para('Species, endemism, genera, islands and conservation listings are counted from CDFP’s species records. ' +
         'Couplet numbers run through the whole key, as in the manuscript. Descriptions are condensed in our own ' +
-        'words from the treatment named on each page and are never reproduced verbatim.'),
+        'words from the treatment named on each page and are never reproduced verbatim. Map coastlines are ' +
+        'Natural Earth 1:10m (public domain); islands too small for that scale are listed by name rather than drawn.'),
       para(esc(DATA.cdfp_citation) + ' Data generated ' + esc(DATA.generated) + '.')
     ]);
 

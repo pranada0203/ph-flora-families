@@ -588,29 +588,84 @@ details.more p { margin: 8px 0 0; line-height: 1.66; }
 
 /* -------------------------------------------------------- distribution */
 
-.distwrap { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 32px; align-items: start; }
-.mapbox {
-  flex-shrink: 0;
-  background: var(--paper-2);
-  border-radius: 6px;
-  padding: 14px;
+.distwrap { display: grid; grid-template-columns: minmax(0, 400px) minmax(0, 1fr); gap: 32px; align-items: start; }
+
+/* the map: Natural Earth coastlines on a pale sea */
+.mapfig {
+  position: relative;
+  margin: 0;
+  border: 1px solid #D5DED8;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #EEF3EF;
+  box-shadow: 0 1px 2px rgba(40, 60, 50, 0.06), 0 8px 24px rgba(40, 60, 50, 0.08);
 }
-.mapbox svg { display: block; height: 430px; width: auto; }
-.mapbox .cap { margin-top: 8px; font-size: 11px; color: #8B8377; max-width: 270px; line-height: 1.5; }
-.isle      { fill: #DED8C6; }
-.isle.on   { fill: var(--forest); }
-.isle-label{ font-family: var(--body); font-size: 9px; fill: #3E3A32; }
+.phmap { display: block; width: 100%; height: auto; touch-action: manipulation; }
+.phmap .grat line { stroke: #BCCBC4; stroke-width: 0.5; stroke-dasharray: 1.5 3; }
+.phmap .grat text { font-family: var(--mono); font-size: 7.5px; fill: #8A9B94; letter-spacing: 0.3px; }
+.phmap .sea {
+  font-family: var(--serif); font-style: italic; font-size: 9.5px; letter-spacing: 1.2px;
+  fill: #7F988E; pointer-events: none;
+}
+.phmap .sea.big { font-size: 12.5px; letter-spacing: 3px; fill: #8BA39A; }
+.phmap .base { fill: #F5EFE1; stroke: #F5EFE1; stroke-width: 1; stroke-linejoin: round; }
+.phmap .neatline { fill: none; stroke: #BCC9C2; stroke-width: 0.8; pointer-events: none; }
+.phmap .coast { fill: none; stroke: #8F8468; stroke-width: 0.55; stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
+.phmap .hit {
+  stroke-width: 1.1; stroke-linejoin: round;
+  cursor: pointer; transition: opacity 0.18s ease, filter 0.18s ease;
+}
+.phmap .veil { fill: #F3F5F0; opacity: 0; pointer-events: none; transition: opacity 0.18s ease; }
+.phmap.focus .veil { opacity: 0.62; }
+.phmap .litlayer { pointer-events: none; filter: drop-shadow(0 0 1.8px rgba(8, 30, 20, 0.8)); }
+.phmap .isle-name {
+  font-family: var(--serif); font-style: italic; letter-spacing: 0.2px;
+  fill: #10261B; paint-order: stroke; stroke: rgba(245, 239, 225, 0.9); stroke-width: 2.8px; stroke-linejoin: round;
+  pointer-events: none;
+}
+.phmap .scale rect.dark { fill: #3F5249; }
+.phmap .scale rect.light { fill: #FFFFFF; stroke: #3F5249; stroke-width: 0.6; }
+.phmap .scale text, .phmap .north text { font-family: var(--mono); font-size: 7.5px; fill: #4E6158; }
+.phmap .north path { fill: #3F5249; }
+
+.maptip {
+  position: absolute; z-index: 3; pointer-events: none;
+  min-width: 132px; padding: 7px 10px;
+  background: #1C1B18; color: #F4F1E8; border-radius: 6px;
+  font-family: var(--body); font-size: 12.5px; line-height: 1.5;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+.maptip .row { display: flex; justify-content: space-between; gap: 16px; }
+.maptip .ct { font-family: var(--mono); font-size: 11px; opacity: 0.75; }
+
+.maplegend { padding: 12px 16px 14px; background: var(--paper); border-top: 1px solid var(--paper-line); }
+.maplegend .lrow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; font-size: 11.5px; color: var(--paper-mute); }
+.maplegend .none, .maplegend .rr { display: inline-flex; align-items: center; gap: 7px; }
+.maplegend .none .sw { width: 13px; height: 10px; background: #F5EFE1; border: 1px solid #B6AC93; border-radius: 2px; }
+.maplegend .ramp { width: 110px; height: 8px; border-radius: 4px; }
+.maplegend .lo, .maplegend .hi { font-family: var(--mono); font-size: 10.5px; }
+.mapnote { margin: 9px 0 0; font-size: 11.5px; line-height: 1.55; color: var(--paper-mute); }
 
 .distlist { min-width: 0; }
 .chipset { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .ichip {
-  font-size: 12px;
+  display: inline-flex; align-items: center;
+  font-family: var(--body); font-size: 12px; line-height: 1.4;
   padding: 4px 9px;
+  border: 1px dashed var(--paper-line);
   border-radius: 14px;
-  background: var(--paper-2);
-  color: var(--paper-body);
+  background: transparent;
+  color: var(--paper-mute);
 }
+.ichip.mapped { border: 1px solid transparent; background: var(--paper-2); color: var(--paper-body); cursor: pointer; }
+.ichip.mapped:hover, .ichip.lit { background: var(--paper-fg); color: var(--paper); }
+.ichip.mapped:focus-visible { outline: 2px solid var(--forest); outline-offset: 1px; }
+.ichip .sw { width: 9px; height: 9px; margin-right: 6px; border-radius: 2px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12); }
 .ichip .n { font-family: var(--mono); font-size: 10.5px; color: var(--paper-mute); margin-left: 5px; }
+.ichip.lit .n, .ichip.mapped:hover .n { color: #C9C2B0; }
+.chipkey { margin: 10px 0 0; font-size: 11.5px; color: var(--paper-mute); }
+.chipkey .sw { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border-radius: 2px; background: rgb(63, 128, 92); vertical-align: -1px; }
+.chipkey .dash { padding: 0 5px; border: 1px dashed var(--paper-line); border-radius: 8px; }
 
 /* ------------------------------------------------------------- tables */
 
@@ -962,8 +1017,7 @@ dialog.about::backdrop { background: rgba(8, 10, 6, 0.62); }
   .banner { padding: 13px 20px; }
   .topstats { display: none; }
   .distwrap { grid-template-columns: 1fr; }
-  .mapbox svg { margin: 0 auto; }
-  .mapbox .cap { max-width: none; }
+  .mapfig { max-width: 460px; width: 100%; justify-self: center; }
 }
 
 @media (max-width: 600px) {
