@@ -170,6 +170,54 @@
 
   // -------------------------------------------------------------- landing
 
+  /* Where the descriptions stand, twice over: counted by family, and weighted by
+     endemic species. The second bar is the one that matters for a Philippine
+     flora — a handful of large, endemic-rich families sit under a caveat.
+     Each segment filters the family list to that status. */
+  function coverage() {
+    var box = el('section', 'coverage');
+    box.setAttribute('aria-label', 'Description coverage');
+    box.appendChild(el('h2', null, 'How far the descriptions have got'));
+
+    function bar(label, weigh, unit) {
+      var total = DATA.families.reduce(function (n, f) { return n + weigh(f); }, 0);
+      var row = el('div', 'cov-row');
+      var head = el('div', 'cov-head');
+      head.appendChild(el('span', null, label));
+      head.appendChild(el('span', 'n', num(total) + ' ' + unit));
+      row.appendChild(head);
+      var track = el('div', 'cov-bar');
+      STATUS_ORDER.forEach(function (code) {
+        var n = DATA.families.reduce(function (s, f) { return s + (f.status === code ? weigh(f) : 0); }, 0);
+        if (!n) return;
+        var pct = 100 * n / total;
+        var seg = el('button', 'cov-seg ' + code);
+        seg.type = 'button';
+        seg.style.flexGrow = String(n);
+        seg.title = STATUS_LABEL[code] + ': ' + num(n) + ' ' + unit + ' (' + pct.toFixed(1) + '%)';
+        seg.setAttribute('aria-label', seg.title + '. Show these families.');
+        if (pct >= 7) seg.appendChild(el('span', null, Math.round(pct) + '%'));
+        seg.addEventListener('click', function () { state.status = code; render(); openRailOnMobile(); });
+        track.appendChild(seg);
+      });
+      row.appendChild(track);
+      return row;
+    }
+    box.appendChild(bar('Families', function () { return 1; }, 'families'));
+    box.appendChild(bar('Weighted by endemic species', function (f) { return f.endemic || 0; }, 'endemic species'));
+
+    var legend = el('div', 'cov-legend');
+    STATUS_ORDER.forEach(function (code) {
+      if (!DATA.totals.by_status[code]) return;
+      var item = el('span');
+      item.appendChild(el('span', 'dot ' + code));
+      item.appendChild(document.createTextNode(STATUS_LABEL[code]));
+      legend.appendChild(item);
+    });
+    box.appendChild(legend);
+    return box;
+  }
+
   function renderLanding() {
     var t = DATA.totals;
     var stage = document.getElementById('stage');
@@ -194,15 +242,20 @@
       c.appendChild(el('div', 'd', d));
       return c;
     }
+    var review = (t.key_review || [])[t.key_review ? t.key_review.length - 1 : 0];
     cards.appendChild(card('', 'FAMILIES', num(t.families), null,
       num(t.species) + ' accepted species, ' + num(t.endemic) + ' endemic (' + t.endemic_percent + '%)'));
+    if (review) {
+      cards.appendChild(card('review', 'KEY COUPLETS FROM CO-AUTHOR REVIEW', num(review.couplets), ' / ' + num(t.key_couplets),
+        review.reviewer.replace(/\s*\(.*\)$/, '') + ', applied ' + review.date_display));
+    }
     cards.appendChild(card('good', 'DESCRIBED, NO CAVEAT', num(t.by_status.complete || 0), ' / ' + t.families,
       'Compiled from a Philippine or Malesian treatment with nothing flagged'));
-    cards.appendChild(card('warn', 'FLAGGED INCOMPLETE', num(t.by_status.flagged || 0), null,
-      'Usable, but the page states what is wrong with the source'));
-    cards.appendChild(card('bad', 'CO-AUTHOR VERIFIED', num(t.verified), ' / ' + t.families,
-      'Nothing on this draft has been checked by a co-author yet'));
+    cards.appendChild(card('bad', 'FAMILY PAGES VERIFIED', num(t.verified), ' / ' + t.families,
+      t.verified ? 'Checked by a co-author page by page' : 'No family page has been checked by a co-author yet'));
     wrap.appendChild(cards);
+
+    wrap.appendChild(coverage());
 
     wrap.appendChild(el('h2', null, 'Read this first'));
     var p = el('p', 'note');
@@ -211,8 +264,16 @@
       'is flagged, missing, or drawn from a flora of another region. That is not a gap in the data — it is the ' +
       'state of the literature: Flora Malesiana never treated most of them. Every affected family says so at the ' +
       'top of its own page, in red or amber, before you read a word of the description. ' +
-      'Nothing here has been verified by a co-author, so nothing here should be cited yet.';
+      (t.verified
+        ? 'Only pages marked as verified have been checked by a co-author.'
+        : 'No family page has been verified by a co-author, so nothing here should be cited yet.');
     wrap.appendChild(p);
+    if (review) {
+      var pr = el('p', 'note');
+      pr.innerHTML = '<strong>The key itself, ' + esc(review.date_display) + ':</strong> ' + esc(review.summary) +
+        ' Couplets that came from this review are marked on every Key path tab.';
+      wrap.appendChild(pr);
+    }
 
     wrap.appendChild(el('h2', null, 'Where the endemism is'));
     var top = DATA.families.slice().sort(function (a, b) { return b.endemic - a.endemic; }).slice(0, 12);
@@ -389,28 +450,34 @@
       'neighbours are left unsaid. For the full account, see the Description tab.';
     p.appendChild(intro);
 
-    var numnote = el('p', 'keyintro');
-    numnote.innerHTML =
+    var numnote = el('details', 'more');
+    numnote.appendChild(el('summary', null, 'About the couplet numbers'));
+    numnote.appendChild(el('p', null,
       'Couplets are numbered as they run through the whole key, which is the numbering the manuscript uses. ' +
       'Where a couplet was inherited from Copeland, his own 1908 number is given alongside it — he ' +
       'restarted at 1 in each section and reused the same number for sibling couplets, so his numbers alone ' +
-      'do not identify a couplet.';
+      'do not identify a couplet.'));
     p.appendChild(numnote);
 
     if (f.routes.length > 1) {
+      var mr = el('p', 'keyintro');
+      mr.textContent = 'This family is reachable by ' + f.routes.length + ' different routes through the key. ' +
+        'All of them are shown; a reader arriving by any of them should land in the same place.';
+      p.appendChild(mr);
       var pick = el('div', 'routepick');
+      pick.setAttribute('role', 'group');
+      pick.setAttribute('aria-label', 'Routes to ' + f.family);
       f.routes.forEach(function (r, i) {
-        var b = el('button', null, 'Route ' + (i + 1) + ' — ' + r.couplet + r.letter);
+        var b = el('button');
         b.type = 'button';
+        b.appendChild(el('span', 'rn', 'Route ' + (i + 1)));
+        b.appendChild(el('span', 'rc', r.couplet + r.letter));
+        if (r.qualifier) b.appendChild(el('span', 'rq', r.qualifier));
         b.setAttribute('aria-pressed', state.route === i ? 'true' : 'false');
-        b.addEventListener('click', function () { state.route = i; renderStage(); });
+        b.addEventListener('click', function () { state.route = i; renderStage(true); });
         pick.appendChild(b);
       });
       p.appendChild(pick);
-      var mr = el('p', 'keyintro');
-      mr.textContent = 'This family is reachable by ' + f.routes.length + ' different routes through the key. ' +
-        'All of them are shown; a reader arriving by either should land in the same place.';
-      p.appendChild(mr);
     }
 
     var route = f.routes[Math.min(state.route, f.routes.length - 1)];
@@ -418,11 +485,18 @@
     var v = el('div', 'verdict');
     v.appendChild(el('div', 'h', 'The lead that resolves to this family'));
     v.appendChild(el('div', 'lead', '“' + route.lead + '”'));
+    if (route.qualifier) {
+      var q = el('div', 'qual');
+      q.innerHTML = 'On this route the key names <strong>' + esc(f.family) + '</strong> <em>(' +
+        esc(route.qualifier) + ')</em> — the genera the reviewer gave for this endpoint.';
+      v.appendChild(q);
+    }
     var meta = [];
     meta.push('Couplet <strong>' + esc(route.couplet + route.letter) + '</strong>');
     if (route.section) meta.push('section ' + esc(route.section));
     meta.push(route.steps.length + ' ' + plural(route.steps.length, 'step') + ' from the start of the key');
     meta.push(route.inherited_steps + ' of them inherited from Copeland (1908)');
+    if (route.coauthor_steps) meta.push(route.coauthor_steps + ' from co-author review');
     var mline = el('div', 'meta');
     mline.innerHTML = meta.join(' &middot; ') + '.';
     if (route.copeland) {
@@ -439,31 +513,63 @@
     }
     p.appendChild(v);
 
-    p.appendChild(el('div', 'ladder-head', 'The route from couplet 1'));
+    var lh = el('div', 'ladder-top');
+    lh.appendChild(el('div', 'ladder-head', 'The route from couplet 1'));
+    var legend = el('div', 'prov-legend');
+    var tally = { copeland: 0, rebuilt: 0, coauthor: 0 };
+    route.steps.forEach(function (s) { tally[s.origin || (s.inherited ? 'copeland' : 'rebuilt')]++; });
+    [['copeland', 'Copeland 1908'], ['rebuilt', 'Rebuilt for this key'], ['coauthor', 'Co-author review']]
+      .forEach(function (o) {
+        if (!tally[o[0]]) return;
+        var item = el('span', 'prov ' + o[0]);
+        item.appendChild(el('span', 'sw'));
+        item.appendChild(document.createTextNode(o[1] + ' '));
+        item.appendChild(el('span', 'n', String(tally[o[0]])));
+        legend.appendChild(item);
+      });
+    lh.appendChild(legend);
+    p.appendChild(lh);
 
     var ol = el('ol', 'ladder');
     var lastSection = null;
     route.steps.forEach(function (s) {
-      var li = el('li', 'rung' + (s.terminal ? ' terminal' : ''));
+      var origin = s.origin || (s.inherited ? 'copeland' : 'rebuilt');
+      if (s.section && s.section !== lastSection) {
+        ol.appendChild(el('li', 'rung-section', s.section));
+        lastSection = s.section;
+      }
+      var li = el('li', 'rung ' + origin + (s.terminal ? ' terminal' : ''));
       li.appendChild(el('div', 'num', (s.couplet ? s.couplet : s.node) + s.letter));
       var body = el('div', 'body');
       if (s.character) body.appendChild(el('div', 'char', s.character));
       body.appendChild(el('div', 'txt', s.lead));
       var marks = el('div', 'marks');
-      if (s.section && s.section !== lastSection) {
-        marks.appendChild(el('span', 'mark', s.section));
-        lastSection = s.section;
+      if (origin === 'copeland') {
+        marks.appendChild(el('span', 'mark cope', s.lead_in
+          ? 'Copeland 1908 · opening lead-in'
+          : 'Copeland 1908' + (s.section_couplet ? ' · his ' + s.section_couplet + s.letter : '')));
+      } else if (origin === 'coauthor') {
+        var m = el('span', 'mark coauthor', 'Co-author review · ' + s.reviewer);
+        m.title = 'Review comment ' + s.review_comments + ' (data/almoro-review-2026-09.json)';
+        marks.appendChild(m);
+        marks.appendChild(el('span', 'mark', 'comment ' + s.review_comments));
+      } else {
+        marks.appendChild(el('span', 'mark new', 'rebuilt for this key'));
       }
-      marks.appendChild(el('span', 'mark ' + (s.inherited ? 'cope' : 'new'),
-        s.inherited
-          ? 'Copeland 1908' + (s.section_couplet ? ' · his ' + s.section_couplet + s.letter : '')
-          : 'rebuilt for this key'));
+      if (s.amended) {
+        var am = el('span', 'mark coauthor', 'amended in co-author review');
+        am.title = s.amended;
+        marks.appendChild(am);
+      }
       if (s.source) marks.appendChild(el('span', 'mark', s.source));
       if (s.confidence) marks.appendChild(el('span', 'mark', 'confidence ' + s.confidence));
       if (s.review) marks.appendChild(el('span', 'mark review', s.review));
       if (s.limitation) marks.appendChild(el('span', 'mark review', s.limitation));
-      if (s.terminal) marks.appendChild(el('span', 'mark new', 'resolves to ' + f.family));
-      if (marks.childNodes.length) body.appendChild(marks);
+      if (s.terminal) {
+        marks.appendChild(el('span', 'mark end',
+          'resolves to ' + f.family + (route.qualifier ? ' (' + route.qualifier + ')' : '')));
+      }
+      body.appendChild(marks);
       li.appendChild(body);
       ol.appendChild(li);
     });
@@ -540,7 +646,7 @@
     box.appendChild(el('div', 'cap',
       'Schematic. Shaded islands are those CDFP records for this family; depth of shade follows the species ' +
       'count. ' + placed + ' of ' + f.islands.length + ' recorded ' +
-      plural(f.islands.length, 'island') + ' can be drawn here — the rest are listed at right.'));
+      plural(f.islands.length, 'island') + ' can be drawn here; every recorded island is listed by name.'));
     wrap.appendChild(box);
 
     // list
@@ -680,16 +786,56 @@
     }
   }
 
+  /* Previous / next within whatever the rail currently shows, so a reviewer can
+     walk a filtered list (say, every flagged family) without going back to it. */
+  function sheetNav(f) {
+    var list = sorted(DATA.families.filter(matches));
+    var i = list.findIndex(function (x) { return x.family === f.family; });
+    var nav = el('nav', 'sheetnav');
+    nav.setAttribute('aria-label', 'Family navigation');
+    var back = el('a', 'back', '← All families');
+    back.href = '#';
+    nav.appendChild(back);
+    var pos = el('span', 'pos', i === -1 ? 'not in the current filter' : (i + 1) + ' of ' + list.length);
+    nav.appendChild(pos);
+    function step(delta, label) {
+      var target = i === -1 ? null : list[i + delta];
+      var a = el('a', 'step', label);
+      if (target) {
+        a.href = '#' + encodeURIComponent(target.family) + (state.tab === 'description' ? '' : '/' + state.tab);
+        a.title = target.family;
+      } else {
+        a.setAttribute('aria-disabled', 'true');
+      }
+      return a;
+    }
+    nav.appendChild(step(-1, '‹ Prev'));
+    nav.appendChild(step(1, 'Next ›'));
+    return nav;
+  }
+
   function renderSheet(f) {
     var stage = document.getElementById('stage');
     stage.textContent = '';
+    document.title = f.family + ' — PH·FLORA';
+
+    stage.appendChild(sheetNav(f));
 
     var sheet = el('article', 'sheet');
     sheet.appendChild(bannerFor(f));
 
     var head = el('div', 'sheet-head');
     var eyebrow = [f.order, f.clade, f.major_group].filter(Boolean).join(' · ');
-    head.appendChild(el('div', 'eyebrow', eyebrow));
+    var toprow = el('div', 'head-top');
+    toprow.appendChild(el('div', 'eyebrow', eyebrow));
+    if (f.routes.length) {
+      var keyed = el('a', 'keyed');
+      keyed.href = '#' + encodeURIComponent(f.family) + '/key';
+      keyed.appendChild(el('span', 'k', f.routes.length > 1 ? f.routes.length + ' key routes' : 'Keyed at'));
+      keyed.appendChild(el('span', 'v', f.routes.map(function (r) { return r.couplet + r.letter; }).join(' · ')));
+      toprow.appendChild(keyed);
+    }
+    head.appendChild(toprow);
     head.appendChild(el('h1', null, f.family));
     if (f.alternate_name) head.appendChild(el('div', 'subtitle', 'also written ' + f.alternate_name));
 
@@ -704,17 +850,13 @@
       return d;
     }
     figs.appendChild(fig('', num(f.species), null, 'species'));
-    figs.appendChild(fig('endemic', num(f.endemic), null, 'endemic'));
+    figs.appendChild(fig(f.endemic ? 'endemic' : '', num(f.endemic), null, 'endemic'));
     figs.appendChild(f.endemic_percent == null
       ? fig('', '—', null, 'endemism')
       : fig('', String(f.endemic_percent), '%', 'endemism'));
     figs.appendChild(fig('', String(f.genus_count), null, plural(f.genus_count, 'genus', 'genera')));
     figs.appendChild(fig('', String(f.island_count || 0), null, plural(f.island_count || 0, 'island')));
     if (f.dao_listed) figs.appendChild(fig('threat', String(f.dao_listed), null, 'DENR listed'));
-    if (f.routes.length) {
-      figs.appendChild(fig('', f.routes[0].couplet + f.routes[0].letter, null,
-        f.routes.length > 1 ? f.routes.length + ' key routes' : 'key couplet'));
-    }
     head.appendChild(figs);
     sheet.appendChild(head);
 
@@ -737,20 +879,37 @@
     sheet.appendChild(tabPanel(f));
 
     stage.appendChild(sheet);
-    stage.scrollTop = 0;
   }
 
   // ---------------------------------------------------------------- render
 
-  function renderStage() {
+  var lastView = null;
+  function renderStage(keepScroll) {
+    var stage = document.getElementById('stage');
+    var y = stage.scrollTop, wy = window.scrollY;
     if (state.family && BY_NAME[state.family]) renderSheet(BY_NAME[state.family]);
-    else renderLanding();
+    else { document.title = 'Philippine Vascular Plant Families'; renderLanding(); }
+    document.body.classList.toggle('family-open', !!(state.family && BY_NAME[state.family]));
+
+    // Jump to the top when the family changes; keep the reader's place when
+    // only a tab or a route changes.
+    var view = state.family || '';
+    if (keepScroll || view === lastView) { stage.scrollTop = y; window.scrollTo(0, wy); }
+    else { stage.scrollTop = 0; window.scrollTo(0, 0); }
+    lastView = view;
   }
 
   function render() {
     renderFacets();
     renderList(sorted(DATA.families.filter(matches)));
     renderStage();
+  }
+
+  /* On a phone the rail stacks above the page; opening it scrolls to it. */
+  function openRailOnMobile() {
+    if (!window.matchMedia('(max-width: 900px)').matches) return;
+    document.body.classList.remove('family-open');
+    document.getElementById('rail').scrollIntoView({ block: 'start' });
   }
 
   // ----------------------------------------------------------------- hash
@@ -778,6 +937,7 @@
       data.totals.verified + ' VERIFIED · ' + num(data.totals.endemic) + ' ENDEMIC SPECIES';
 
     var q = document.getElementById('q');
+    if (window.matchMedia('(max-width: 600px)').matches) q.placeholder = 'Family, genus, couplet…';
     var t;
     q.addEventListener('input', function () {
       clearTimeout(t);
@@ -786,6 +946,24 @@
         renderList(sorted(DATA.families.filter(matches)));
       }, 90);
     });
+
+    // "/" jumps to the search box, as on most reference sites; Escape clears it.
+    document.addEventListener('keydown', function (e) {
+      var typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
+      if (e.key === '/' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault(); q.focus(); q.select();
+      } else if (e.key === 'Escape' && document.activeElement === q) {
+        q.value = ''; state.q = ''; renderList(sorted(DATA.families.filter(matches))); q.blur();
+      }
+    });
+
+    // On a phone the filters fold away behind one button.
+    var ft = document.getElementById('filter-toggle');
+    ft.addEventListener('click', function () {
+      var open = !document.getElementById('rail').classList.toggle('filters-closed');
+      ft.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    if (window.matchMedia('(max-width: 900px)').matches) document.getElementById('rail').classList.add('filters-closed');
 
     document.getElementById('about-btn').addEventListener('click', function () {
       location.hash = '';

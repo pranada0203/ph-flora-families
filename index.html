@@ -20,14 +20,15 @@
   <div class="topsearch">
     <label class="sr-only" for="q">Search families, genera or couplets</label>
     <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="Search family, genus or couplet…">
+    <kbd class="kbd" aria-hidden="true">/</kbd>
   </div>
-  <button type="button" class="ghost" id="about-btn">About this draft</button>
+  <button type="button" class="ghost" id="about-btn"><span class="long">About this draft</span><span class="short">About</span></button>
 </header>
 
 <main class="shell">
 
-  <nav class="rail" aria-label="Filters and family list">
-    <div class="facets">
+  <nav class="rail" id="rail" aria-label="Filters and family list">
+    <div class="facets" id="facets">
       <div class="facet">
         <div class="facet-head">Description status</div>
         <div class="chips" id="facet-status"></div>
@@ -41,7 +42,10 @@
         <div class="chips" id="facet-sort"></div>
       </div>
     </div>
-    <div class="rail-count" id="rail-count"></div>
+    <div class="rail-count">
+      <span id="rail-count"></span>
+      <button type="button" class="filter-toggle" id="filter-toggle" aria-expanded="false" aria-controls="facets">Filter &amp; sort</button>
+    </div>
     <ul class="famlist" id="famlist"></ul>
   </nav>
 
