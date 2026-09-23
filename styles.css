@@ -1290,3 +1290,22 @@ dialog.about::backdrop { background: rgba(8, 10, 6, 0.62); }
   .dnames { columns: 1; }
   .dseg { align-self: stretch; }
 }
+
+/* the Species lab banner */
+.labbanner {
+  display: flex; gap: 12px; align-items: flex-start;
+  margin: 0 0 18px; padding: 11px 14px;
+  font-size: 13px; line-height: 1.55; color: #3E3364;
+  background: #EFEBF7; border: 1px solid #D5CDEA; border-radius: 8px;
+}
+.labbanner .tag {
+  flex-shrink: 0; font-family: var(--mono); font-size: 9.5px; letter-spacing: 1.2px;
+  padding: 3px 7px; border-radius: 3px; background: #6F5DA0; color: #FFFFFF;
+}
+.labbanner strong { color: #2A2148; }
+.spx-cta .k { color: #B7A6E6; }
+[data-theme="light"] .spx-cta .k { color: #6F5DA0; }
+
+@media (max-width: 600px) {
+  .labbanner { flex-direction: column; gap: 8px; }
+}

@@ -10,13 +10,13 @@
   var VERSION = (function () { var s = document.currentScript; var m = s && /[?&]v=([^&]+)/.exec(s.src); return m ? m[1] : ''; })();
 
   // species-name index for search, loaded on first use (tools/build-species.js)
-  var SPX = null, SPX_META = null, spxLoading = null;
+  var SPX = null, SPX_META = null, SPX_TOTALS = null, spxLoading = null;
   function loadSpeciesIndex() {
     if (!spxLoading) {
       spxLoading = fetch('data/species-index.json' + (VERSION ? '?v=' + VERSION : ''))
         .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(function (j) {
-          SPX = {}; SPX_META = j.sources;
+          SPX = {}; SPX_META = j.sources; SPX_TOTALS = j.totals;
           j.names.forEach(function (r) { (SPX[r[1]] = SPX[r[1]] || []).push(r[0]); });
         })
         .catch(function () { spxLoading = null; });
@@ -320,7 +320,7 @@
     var spx = el('a', 'spx-cta');
     spx.href = '#species';
     var spxT = el('span', 't');
-    spxT.appendChild(el('span', 'k', 'SPECIES OF THE PHILIPPINES'));
+    spxT.appendChild(el('span', 'k', 'SPECIES LAB · EXPERIMENTAL'));
     spxT.appendChild(el('span', 'h', 'Build a species list by island'));
     spxT.appendChild(el('span', 'd', 'Every species Kew accepts for the Philippines, with CDFP’s islands: for example, all the species known only from Palawan. Filter, open, download.'));
     spx.appendChild(spxT);
@@ -915,7 +915,20 @@
     });
   }
 
+  /* Everything built from the species list is the Species lab: experimental,
+     outside the key and the paper, decided 23 September 2026 (docs/app-direction.md). */
+  function labBanner(extra) {
+    var b = el('div', 'labbanner');
+    b.appendChild(el('span', 'tag', 'SPECIES LAB'));
+    var d = el('div');
+    d.innerHTML = '<strong>Experimental.</strong> Built from Kew’s checklist, CDFP’s island names and live GBIF records. ' +
+      'It is not part of the key or the paper, and no co-author has checked it.' + (extra ? ' ' + extra : '');
+    b.appendChild(d);
+    return b;
+  }
+
   function renderSpecies(p, f, data) {
+    p.appendChild(labBanner());
     var c = data.counts, sp = data.species;
     var lead = el('p', 'keyintro');
     if (!sp.length) {
@@ -1238,24 +1251,27 @@
     stage.appendChild(nav);
     var sheet = el('article', 'sheet');
     var head = el('div', 'sheet-head');
-    head.appendChild(el('div', 'eyebrow', 'All 294 families'));
+    head.appendChild(el('div', 'eyebrow', 'Species lab · experimental · all families'));
     head.appendChild(el('h1', null, 'Species of the Philippines'));
     sheet.appendChild(head);
     var p = el('div', 'panel');
-    var wait = el('p', 'keyintro', 'Loading 9,900 species…');
+    p.appendChild(labBanner());
+    var wait = el('p', 'keyintro', 'Loading the species list…');
     p.appendChild(wait);
     sheet.appendChild(p);
     stage.appendChild(sheet);
     Promise.all([loadAllSpecies(), loadSpeciesIndex()]).then(function (res) {
       if (!state.allsp) return;
-      var sp = res[0].species, T = null;
+      var sp = res[0].species, T = SPX_TOTALS || {};
       p.textContent = '';
+      p.appendChild(labBanner());
       var lead = el('p', 'keyintro');
       var end = sp.filter(function (s) { return s.e; }).length, intro = sp.filter(function (s) { return s.i; }).length;
-      lead.innerHTML = 'Every species Kew’s World Checklist of Vascular Plants accepts for the Philippines — <strong>' + num(sp.length) +
-        '</strong>, of which <strong>' + num(end) + '</strong> are endemic and ' + num(intro) + ' introduced — placed in this ' +
-        'app’s 294 families. Choose islands below to build a list, for example every species known <em>only</em> from Palawan, ' +
-        'and download it.';
+      lead.innerHTML = 'Kew’s World Checklist of Vascular Plants accepts <strong>' + num(T.species || sp.length) + '</strong> species for the ' +
+        'Philippines. <strong>' + num(sp.length) + '</strong> of them fall in this app’s ' + DATA.families.length + ' families' +
+        (T.unplaced ? ' (the other ' + T.unplaced + ' belong to families CDFP does not recognise)' : '') + ': <strong>' + num(end) +
+        '</strong> endemic and ' + num(intro) + ' introduced. Choose islands below to build a list, for example every species ' +
+        'known <em>only</em> from Palawan, and download it.';
       p.appendChild(lead);
       speciesExplorer(p, sp, { family: null });
       p.appendChild(speciesSources());
@@ -1554,7 +1570,7 @@
     // the island filter, shared with the Species tab
     var box = el('div', 'dfilter');
     var bhead = el('div', 'dhead');
-    bhead.appendChild(el('span', 'h', 'Filter by island'));
+    bhead.appendChild(el('span', 'h', 'Filter by island · Species lab'));
     var clearB = el('button', 'linkbtn', 'Clear');
     clearB.type = 'button';
     bhead.appendChild(clearB);
@@ -1916,7 +1932,7 @@
 
     var tabs = el('div', 'tabs');
     tabs.setAttribute('role', 'tablist');
-    [['description', 'Description'], ['key', 'Key path'], ['species', 'Species'], ['genera', 'Genera'],
+    [['description', 'Description'], ['key', 'Key path'], ['species', 'Species lab'], ['genera', 'Genera'],
      ['dist', 'Distribution'], ['cons', 'Conservation'], ['sources', 'Sources']]
     .forEach(function (t) {
       var b = el('button', 'tab', t[1]);
@@ -2080,7 +2096,7 @@
       para(esc(DATA.cdfp_citation) + ' Data generated ' + esc(DATA.generated) + '.')
     ]);
 
-    section('The Species tab', [
+    section('The Species lab (experimental)', [
       para('The species list is Kew’s <strong>World Checklist of Vascular Plants</strong> (CC BY 4.0): every species it accepts for the ' +
         'Philippines, native or introduced. Island names come from <strong>Co’s Digital Flora of the Philippines</strong> (names only, ' +
         'credited on every list), and each species says whether CDFP lists it. <strong>GBIF</strong> records and photographs are fetched ' +
