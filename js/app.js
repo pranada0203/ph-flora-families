@@ -1111,17 +1111,7 @@
     var more = el('div', 'spmore');
     p.appendChild(more);
 
-    function islandTest(s) {
-      var sel = state.spisl;
-      if (!sel.length) return true;
-      if (!s.ci.length) return false;
-      var hits = s.ci.filter(function (t) { return sel.indexOf(t) !== -1; }).length;
-      if (mode === 'any') return hits > 0;
-      if (mode === 'only') return hits > 0 && hits === s.ci.length;
-      if (mode === 'also') return hits > 0 && hits < s.ci.length;
-      if (mode === 'every') return sel.every(function (t) { return s.ci.indexOf(t) !== -1; });
-      return true;
-    }
+    function islandTest(s) { return islandMatch(s.ci, state.spisl, mode); }
     var current = [];
     var open = state.spopen || null;
     function draw(reset) {
@@ -1343,23 +1333,42 @@
     return 'rgb(' + [0, 1, 2].map(function (i) { return Math.round(a[i] + (b[i] - a[i]) * u); }).join(',') + ')';
   }
 
+  /* One matching rule for every island filter in the app, so the map and the
+     species lists can never disagree. sel: chosen island tokens; ci: a
+     species' CDFP island tokens. */
+  var MATCH_MODES = [['any', 'Found on'], ['only', 'Only on'], ['also', 'Also elsewhere'], ['every', 'On all of these']];
+  function islandMatch(ci, sel, mode) {
+    if (!sel.length) return true;
+    if (!ci || !ci.length) return false;
+    var hits = ci.filter(function (t) { return sel.indexOf(t) !== -1; }).length;
+    if (mode === 'only') return hits > 0 && hits === ci.length;
+    if (mode === 'also') return hits > 0 && hits < ci.length;
+    if (mode === 'every') return sel.every(function (t) { return ci.indexOf(t) !== -1; });
+    return hits > 0;
+  }
+  function matchSentence(sel, mode) {
+    var names = sentence(sel.map(titleCase)).replace(/ and ([^ ]+)$/, (sel.length > 1 && mode !== 'every' ? ' or ' : ' and ') + '$1');
+    return {
+      any: 'recorded from ' + names + ', whether or not they occur elsewhere',
+      only: 'recorded from ' + names + ' and from no other island',
+      also: 'recorded from ' + names + ' and from at least one other island as well',
+      every: 'recorded from every one of ' + names,
+    }[mode] || '';
+  }
+
   function panelDistribution(p, f) {
     if (!f.islands.length) {
       p.appendChild(el('p', 'missing', 'CDFP records no island-level distribution for this family.'));
       return;
     }
     var M = DATA.map;
-    var counts = {};
-    f.islands.forEach(function (i) { counts[i.name] = i.count; });
-    var max = f.islands[0].count || 1;
-    var shade = function (n) { return rampColour(Math.sqrt(n / max)); };
-
-    // which recorded tokens cover each polygon
-    var cover = {};
-    Object.keys(M.islands).forEach(function (tok) {
-      if (!counts[tok]) return;
-      M.islands[tok].forEach(function (pi) { (cover[pi] = cover[pi] || []).push(tok); });
-    });
+    var famCounts = {};
+    f.islands.forEach(function (i) { famCounts[i.name] = i.count; });
+    var famMax = f.islands[0].count || 1;
+    if (!state.spisl) state.spisl = [];
+    var mode = state.spmode || 'any';
+    var SPD = null;              // this family's species, once loaded (for filtering)
+    var view = null;             // what the map currently shades: { counts, max, filtered }
 
     var wrap = el('div', 'distwrap');
     var fig = el('figure', 'mapfig');
@@ -1407,20 +1416,12 @@
     });
     svg.appendChild(sg);
 
-    // land: one silhouette, then the recorded polygons on top
+    // land: one silhouette; the shaded islands, the focus veil, the chosen islands'
+    // outlines, the coastline and the names are separate layers above it
     var land = svgEl('g', { class: 'land', filter: 'url(#land-shadow)' });
     land.appendChild(svgEl('path', { d: M.polys.join(''), class: 'base' }));
     svg.appendChild(land);
-
     var hits = svgEl('g', { class: 'hits' });
-    var hitPaths = {};
-    Object.keys(cover).forEach(function (pi) {
-      var toks = cover[pi].sort(function (a, b) { return counts[b] - counts[a]; });
-      var colour = shade(counts[toks[0]]);
-      var path = svgEl('path', { d: M.polys[pi], class: 'hit', fill: colour, stroke: colour, 'data-toks': toks.join('|') });
-      hits.appendChild(path);
-      toks.forEach(function (t) { (hitPaths[t] = hitPaths[t] || []).push(path); });
-    });
     svg.appendChild(hits);
     // Focus: a translucent veil over the whole map, with the chosen island's
     // polygons copied above it (dimming each polygon separately would show the
@@ -1429,26 +1430,13 @@
     svg.appendChild(veil);
     var litLayer = svgEl('g', { class: 'litlayer' });
     svg.appendChild(litLayer);
-    // the coastline on top: only edges that face the sea, so no province borders show
     svg.appendChild(svgEl('path', { d: M.coast, class: 'coast' }));
-
-    // island names: the recorded islands big enough to carry a label, most species first
+    var selLayer = svgEl('g', { class: 'sellayer' });
+    svg.appendChild(selLayer);
     var lg = svgEl('g', { class: 'labels' });
-    var boxes = [];
-    Object.keys(counts).filter(function (t) { return M.labels[t] && M.labels[t][2] >= 16; })
-      .sort(function (a, b) { return counts[b] - counts[a] || M.labels[b][2] - M.labels[a][2]; })
-      .slice(0, 9)
-      .forEach(function (tok) {
-        var L = M.labels[tok], name = titleCase(tok).replace(' (Metro Manila)', '');
-        var w = name.length * 5.4 + 4, h = 12, bx = [L[0] - w / 2, L[1] - h / 2, L[0] + w / 2, L[1] + h / 2];
-        if (boxes.some(function (b) { return !(bx[2] < b[0] || bx[0] > b[2] || bx[3] < b[1] || bx[1] > b[3]); })) return;
-        boxes.push(bx);
-        var size = Math.max(10, Math.min(13.5, 8.5 + L[2] / 45));
-        lg.appendChild(svgEl('text', { x: L[0], y: L[1] + 4, 'text-anchor': 'middle', class: 'isle-name', 'font-size': size.toFixed(1) }, name));
-      });
     svg.appendChild(lg);
 
-    // scale bar (0-100-200 km) and north arrow
+    // scale bar (0-200 km) and north arrow
     var kmpx = M.km_per_px, len = 200 / kmpx, sx = W - len - 18, sy = H - 26;
     var sc = svgEl('g', { class: 'scale' });
     sc.appendChild(svgEl('rect', { x: sx, y: sy, width: len / 2, height: 4, class: 'dark' }));
@@ -1461,40 +1449,96 @@
     na.appendChild(svgEl('path', { d: 'M0 -13 L6 5 L0 1 L-6 5 Z' }));
     na.appendChild(svgEl('text', { x: 0, y: 17, 'text-anchor': 'middle' }, 'N'));
     svg.appendChild(na);
-    // a thin inner frame, as on a printed atlas plate
     svg.appendChild(svgEl('rect', { x: 5.5, y: 5.5, width: W - 11, height: H - 11, class: 'neatline' }));
-
     fig.appendChild(svg);
 
-    // hover card
     var tip = el('div', 'maptip');
     tip.hidden = true;
     fig.appendChild(tip);
 
-    // legend
+    // legend (redrawn when the map switches between family and filtered shading)
     var leg = el('figcaption', 'maplegend');
-    var bar = el('div', 'ramp');
-    bar.style.background = 'linear-gradient(90deg,' + [0, 0.25, 0.5, 0.75, 1].map(rampColour).join(',') + ')';
     var lrow = el('div', 'lrow');
-    var none = el('span', 'none');
-    none.appendChild(el('span', 'sw'));
-    none.appendChild(document.createTextNode('not recorded'));
-    lrow.appendChild(none);
-    var rr = el('span', 'rr');
-    rr.appendChild(el('span', 'lo', '1'));
-    rr.appendChild(bar);
-    rr.appendChild(el('span', 'hi', num(max) + ' ' + plural(max, 'species')));
-    lrow.appendChild(rr);
     leg.appendChild(lrow);
     var placed = f.islands.filter(function (i) { return i.mapped; }).length;
-    leg.appendChild(el('p', 'mapnote',
-      'Shading follows the number of this family’s species CDFP records from each island. ' + placed + ' of ' +
-      f.islands.length + ' recorded ' + plural(f.islands.length, 'island') + ' can be drawn at this scale; ' +
-      'every one is listed by name. Coastlines: Natural Earth 1:10m, public domain.'));
+    var mapnote = el('p', 'mapnote');
+    leg.appendChild(mapnote);
     fig.appendChild(leg);
     wrap.appendChild(fig);
 
-    // list
+    // ------------------------------------------------ the shaded islands
+    var hitPaths = {};
+    var NOMATCH = '#DCE3D5';
+    function drawHits() {
+      hits.textContent = '';
+      hitPaths = {};
+      var shade = function (n) { return rampColour(Math.sqrt(n / view.max)); };
+      // every island the family is recorded from stays drawn (and clickable);
+      // under a filter, those with no matching species are drawn pale
+      var cover = {};
+      Object.keys(M.islands).forEach(function (tok) {
+        if (!famCounts[tok]) return;
+        M.islands[tok].forEach(function (pi) { (cover[pi] = cover[pi] || []).push(tok); });
+      });
+      Object.keys(cover).forEach(function (pi) {
+        var toks = cover[pi].sort(function (a, b) { return (view.counts[b] || 0) - (view.counts[a] || 0) || famCounts[b] - famCounts[a]; });
+        var n = view.counts[toks[0]] || 0;
+        var colour = n ? shade(n) : NOMATCH;
+        var path = svgEl('path', { d: M.polys[pi], class: 'hit' + (n ? '' : ' none'), fill: colour, stroke: colour, 'data-toks': toks.join('|') });
+        hits.appendChild(path);
+        toks.forEach(function (t) { (hitPaths[t] = hitPaths[t] || []).push(path); });
+      });
+
+      // island names: the islands big enough to carry a label, most species first
+      lg.textContent = '';
+      var boxes = [];
+      Object.keys(view.counts).filter(function (t) { return view.counts[t] && M.labels[t] && M.labels[t][2] >= 16; })
+        .sort(function (a, b) { return view.counts[b] - view.counts[a] || M.labels[b][2] - M.labels[a][2]; })
+        .slice(0, 9)
+        .forEach(function (tok) {
+          var L = M.labels[tok], name = titleCase(tok).replace(' (Metro Manila)', '');
+          var w = name.length * 5.4 + 4, h = 12, bx = [L[0] - w / 2, L[1] - h / 2, L[0] + w / 2, L[1] + h / 2];
+          if (boxes.some(function (b) { return !(bx[2] < b[0] || bx[0] > b[2] || bx[3] < b[1] || bx[1] > b[3]); })) return;
+          boxes.push(bx);
+          var size = Math.max(10, Math.min(13.5, 8.5 + L[2] / 45));
+          lg.appendChild(svgEl('text', { x: L[0], y: L[1] + 4, 'text-anchor': 'middle', class: 'isle-name', 'font-size': size.toFixed(1) }, name));
+        });
+
+      // the chosen islands, outlined
+      selLayer.textContent = '';
+      state.spisl.forEach(function (t) {
+        (M.islands[t] || []).forEach(function (pi) { selLayer.appendChild(svgEl('path', { d: M.polys[pi], class: 'selpoly' })); });
+      });
+
+      // legend
+      lrow.textContent = '';
+      var none = el('span', 'none');
+      none.appendChild(el('span', 'sw'));
+      none.appendChild(document.createTextNode('not recorded'));
+      lrow.appendChild(none);
+      if (view.filtered) {
+        var nm = el('span', 'none');
+        var sw2 = el('span', 'sw'); sw2.style.background = NOMATCH; sw2.style.borderColor = '#C4CDBD';
+        nm.appendChild(sw2);
+        nm.appendChild(document.createTextNode('recorded, none match'));
+        lrow.appendChild(nm);
+      }
+      var rr = el('span', 'rr');
+      var bar = el('div', 'ramp');
+      bar.style.background = 'linear-gradient(90deg,' + [0, 0.25, 0.5, 0.75, 1].map(rampColour).join(',') + ')';
+      rr.appendChild(el('span', 'lo', '1'));
+      rr.appendChild(bar);
+      rr.appendChild(el('span', 'hi', num(view.max) + ' ' + (view.filtered ? 'matching' : plural(view.max, 'species'))));
+      lrow.appendChild(rr);
+      mapnote.textContent = view.filtered
+        ? 'Shading follows how many of the matching species CDFP records from each island. Outlined: the islands you chose. ' +
+          'Click islands to change the choice. Coastlines: Natural Earth 1:10m, public domain.'
+        : 'Shading follows the number of this family’s species CDFP records from each island. ' + placed + ' of ' +
+          f.islands.length + ' recorded ' + plural(f.islands.length, 'island') + ' can be drawn at this scale; every one is ' +
+          'listed by name. Click an island to filter by it. Coastlines: Natural Earth 1:10m, public domain.';
+    }
+
+    // ------------------------------------------------ the list column
     var list = el('div', 'distlist');
     var lead = el('p', 'keyintro');
     var top = f.islands.slice(0, 5).map(function (i) { return titleCase(i.name) + ' (' + i.count + ')'; });
@@ -1507,6 +1551,24 @@
         : '');
     list.appendChild(lead);
 
+    // the island filter, shared with the Species tab
+    var box = el('div', 'dfilter');
+    var bhead = el('div', 'dhead');
+    bhead.appendChild(el('span', 'h', 'Filter by island'));
+    var clearB = el('button', 'linkbtn', 'Clear');
+    clearB.type = 'button';
+    bhead.appendChild(clearB);
+    box.appendChild(bhead);
+    var tags = el('div', 'dtags');
+    box.appendChild(tags);
+    var modeRow = el('div', 'seg dseg');
+    modeRow.setAttribute('role', 'group');
+    modeRow.setAttribute('aria-label', 'How to match the chosen islands');
+    box.appendChild(modeRow);
+    var result = el('div', 'dresult');
+    box.appendChild(result);
+    list.appendChild(box);
+
     var set = el('div', 'chipset');
     var chips = {};
     f.islands.forEach(function (i) {
@@ -1514,9 +1576,9 @@
       if (i.mapped) {
         c.type = 'button';
         var sw = el('span', 'sw');
-        sw.style.background = shade(i.count);
+        sw.style.background = rampColour(Math.sqrt(i.count / famMax));
         c.appendChild(sw);
-        c.setAttribute('aria-label', titleCase(i.name) + ', ' + i.count + ' ' + plural(i.count, 'species') + '. Show on map');
+        c.setAttribute('aria-label', titleCase(i.name) + ', ' + i.count + ' ' + plural(i.count, 'species') + '. Filter by this island');
       } else {
         c.title = 'Too small to draw at this map scale';
       }
@@ -1529,15 +1591,85 @@
     var key = el('p', 'chipkey');
     key.innerHTML = '<span class="sw"></span>on the map &nbsp;·&nbsp; <span class="dash">plain</span> too small to draw at this scale';
     list.appendChild(key);
-
     var cap = el('div', 'srcline');
     cap.textContent = 'Island tokens are those CDFP prints in capitals in each species’ Distribution line. ' +
-      'A species recorded from several islands is counted under each.';
+      'A species recorded from several islands is counted under each. Filtered counts come from the Species tab’s list ' +
+      '(Kew’s names with CDFP’s islands), so they can differ slightly from the family totals.';
     list.appendChild(cap);
     wrap.appendChild(list);
     p.appendChild(wrap);
 
-    // ---- linking map and list
+    // ------------------------------------------------ applying the filter
+    function toggleIsland(tok) {
+      state.spisl = state.spisl.indexOf(tok) === -1 ? state.spisl.concat([tok]) : state.spisl.filter(function (x) { return x !== tok; });
+      apply();
+    }
+    function apply() {
+      var sel = state.spisl;
+      box.classList.toggle('on', !!sel.length);
+      Object.keys(chips).forEach(function (t) { chips[t].classList.toggle('sel', sel.indexOf(t) !== -1); });
+
+      tags.textContent = '';
+      if (!sel.length) {
+        tags.appendChild(el('p', 'dempty', 'Click an island on the map or in the list below to see which species grow there — and only there, or also elsewhere.'));
+      }
+      sel.forEach(function (t) {
+        var b = el('button', 'ipick');
+        b.type = 'button';
+        b.appendChild(document.createTextNode(titleCase(t)));
+        b.appendChild(el('span', 'x', '×'));
+        b.setAttribute('aria-label', 'Remove ' + titleCase(t) + ' from the filter');
+        b.addEventListener('click', function () { toggleIsland(t); });
+        tags.appendChild(b);
+      });
+
+      modeRow.textContent = '';
+      modeRow.hidden = !sel.length;
+      var modes = MATCH_MODES.filter(function (m) { return m[0] !== 'every' || sel.length > 1; });
+      if (!modes.some(function (m) { return m[0] === mode; })) mode = 'any';
+      modes.forEach(function (m) {
+        var b = el('button', null, m[1]);
+        b.type = 'button';
+        b.setAttribute('aria-pressed', m[0] === mode ? 'true' : 'false');
+        b.addEventListener('click', function () { mode = m[0]; state.spmode = mode; apply(); });
+        modeRow.appendChild(b);
+      });
+
+      result.textContent = '';
+      if (!sel.length || !SPD) {
+        view = { counts: famCounts, max: famMax, filtered: false };
+        if (sel.length && !SPD) result.appendChild(el('p', 'dempty', 'Loading this family’s species…'));
+        drawHits();
+        return;
+      }
+      var matching = SPD.species.filter(function (s) { return islandMatch(s.ci, sel, mode); })
+        .sort(function (a, b) { return a.n.localeCompare(b.n); });
+      var counts = {}, max = 0;
+      matching.forEach(function (s) { s.ci.forEach(function (t) { counts[t] = (counts[t] || 0) + 1; max = Math.max(max, counts[t]); }); });
+      view = { counts: counts, max: max || 1, filtered: true };
+      drawHits();
+
+      var head = el('p', 'dcount');
+      head.innerHTML = '<strong>' + num(matching.length) + '</strong> ' + plural(matching.length, 'species') + ' of ' + esc(f.family) +
+        ' ' + esc(matchSentence(sel, mode)) + '.';
+      result.appendChild(head);
+      if (matching.length) {
+        var ul = el('ul', 'dnames');
+        matching.slice(0, 12).forEach(function (s) {
+          var li = el('li');
+          li.appendChild(el('em', null, s.n));
+          if (s.e) li.appendChild(el('span', 'tag end', 'endemic'));
+          ul.appendChild(li);
+        });
+        result.appendChild(ul);
+        var go = el('a', 'dgo', matching.length > 12 ? 'All ' + num(matching.length) + ' in the Species tab →' : 'Open them in the Species tab →');
+        go.href = '#' + encodeURIComponent(f.family) + '/species';
+        result.appendChild(go);
+      }
+    }
+    clearB.addEventListener('click', function () { state.spisl = []; apply(); });
+
+    // ------------------------------------------------ hover and click
     function light(toks, on) {
       svg.classList.toggle('focus', on);
       litLayer.textContent = '';
@@ -1551,14 +1683,21 @@
       toks.forEach(function (t) {
         var row = el('div', 'row');
         row.appendChild(el('span', 'nm', titleCase(t)));
-        row.appendChild(el('span', 'ct', counts[t] + ' ' + plural(counts[t], 'species')));
+        row.appendChild(el('span', 'ct', view.filtered
+          ? num(view.counts[t] || 0) + ' of ' + num(famCounts[t]) + ' match'
+          : famCounts[t] + ' ' + plural(famCounts[t], 'species')));
         tip.appendChild(row);
       });
+      tip.appendChild(el('div', 'act', state.spisl.indexOf(mostSpecific(toks)) === -1 ? 'Click to filter by ' + titleCase(mostSpecific(toks)) : 'Click to remove from the filter'));
       tip.hidden = false;
       var r = fig.getBoundingClientRect();
       var x = evt.clientX - r.left, y = evt.clientY - r.top;
       tip.style.left = Math.min(x + 14, r.width - tip.offsetWidth - 6) + 'px';
       tip.style.top = Math.max(6, y - tip.offsetHeight - 10) + 'px';
+    }
+    // a polygon inside both ITBAYAT and BATANES is Itbayat: the token with the fewest polygons
+    function mostSpecific(toks) {
+      return toks.slice().sort(function (a, b) { return (M.islands[a] || []).length - (M.islands[b] || []).length; })[0];
     }
     var current = null;
     function clear() { if (current) light(current, false); current = null; tip.hidden = true; }
@@ -1570,19 +1709,29 @@
       current = toks; light(toks, true); showTip(toks, e);
     });
     svg.addEventListener('pointerleave', clear);
+    svg.addEventListener('click', function (e) {
+      var t = e.target.closest && e.target.closest('.hits .hit');
+      if (!t) return;
+      toggleIsland(mostSpecific(t.getAttribute('data-toks').split('|')));
+      clear();
+    });
     Object.keys(chips).forEach(function (tok) {
-      if (!hitPaths[tok]) return;
+      if (!M.islands[tok]) return;
       var c = chips[tok];
       var on = function () { clear(); current = [tok]; light([tok], true); };
       c.addEventListener('mouseenter', on);
       c.addEventListener('focus', on);
       c.addEventListener('mouseleave', clear);
       c.addEventListener('blur', clear);
-      c.addEventListener('click', function () {
-        on();
-        if (window.matchMedia('(max-width: 900px)').matches) fig.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      });
+      c.addEventListener('click', function () { toggleIsland(tok); });
     });
+
+    apply();
+    loadSpecies(f.family).then(function (data) {
+      if (state.family !== f.family || state.tab !== 'dist') return;
+      SPD = data;
+      apply();
+    }).catch(function () { /* the map still works without the species list */ });
   }
 
   /* CDFP prints categories in whatever order it happens to hold them; list

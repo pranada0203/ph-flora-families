@@ -1254,3 +1254,39 @@ dialog.about::backdrop { background: rgba(8, 10, 6, 0.62); }
 .spmore .spcount { margin: 0; }
 .splinks a.tofam { background: var(--paper-fg); color: var(--paper); border-color: var(--paper-fg); }
 .splinks a.tofam::after { content: ''; }
+
+/* the island filter on the Distribution map */
+.phmap .sellayer { pointer-events: none; }
+.phmap .selpoly { fill: none; stroke: #0E2419; stroke-width: 1.6; stroke-linejoin: round; stroke-dasharray: 3 2; }
+.phmap .hit.none { cursor: pointer; }
+.maptip .act { margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(255, 255, 255, 0.15); font-size: 11px; opacity: 0.75; }
+
+.dfilter {
+  margin: 4px 0 16px; padding: 12px 14px;
+  border: 1px dashed var(--paper-line); border-radius: 10px; background: var(--paper);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.dfilter.on { border-style: solid; border-color: #BFD8C4; background: #F3F8F2; }
+.dhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.dhead .h { font-family: var(--mono); font-size: 10px; letter-spacing: 1.3px; text-transform: uppercase; color: var(--paper-faint); }
+.dfilter:not(.on) .dhead .linkbtn { display: none; }
+.dtags { display: flex; flex-wrap: wrap; gap: 6px; }
+.dempty { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--paper-mute); }
+.dseg { align-self: flex-start; }
+.dseg[hidden] { display: none; }
+.dresult:empty { display: none; }
+.dcount { margin: 0 0 6px; font-size: 13.5px; line-height: 1.55; color: var(--paper-body); }
+.dcount strong { color: var(--paper-fg); }
+.dnames { list-style: none; margin: 0; padding: 0; columns: 2; column-gap: 18px; font-size: 13px; line-height: 1.7; }
+.dnames li { break-inside: avoid; color: var(--paper-fg); }
+.dnames .tag { margin-left: 6px; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.4px; text-transform: uppercase;
+  padding: 1px 4px; border-radius: 3px; background: #E3EDE6; color: #2F6B4F; vertical-align: 1px; }
+.dgo { display: inline-block; margin-top: 8px; font-size: 13px; font-weight: 500; color: var(--forest); text-decoration: none; }
+.dgo:hover { text-decoration: underline; }
+.ichip.mapped.sel { background: var(--forest); color: #FFFFFF; }
+.ichip.mapped.sel .n { color: rgba(255, 255, 255, 0.75); }
+
+@media (max-width: 600px) {
+  .dnames { columns: 1; }
+  .dseg { align-self: stretch; }
+}
