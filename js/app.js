@@ -6,6 +6,30 @@
   'use strict';
 
   var DATA = null;
+  // the cache stamp this script was loaded with (see tools/build-app-data.js)
+  var VERSION = (function () { var s = document.currentScript; var m = s && /[?&]v=([^&]+)/.exec(s.src); return m ? m[1] : ''; })();
+
+  // species-name index for search, loaded on first use (tools/build-species.js)
+  var SPX = null, SPX_META = null, spxLoading = null;
+  function loadSpeciesIndex() {
+    if (!spxLoading) {
+      spxLoading = fetch('data/species-index.json' + (VERSION ? '?v=' + VERSION : ''))
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function (j) {
+          SPX = {}; SPX_META = j.sources;
+          j.names.forEach(function (r) { (SPX[r[1]] = SPX[r[1]] || []).push(r[0]); });
+        })
+        .catch(function () { spxLoading = null; });
+    }
+    return spxLoading;
+  }
+  /** The first species of a family whose name contains the query, if the index is loaded. */
+  function speciesHit(f, q) {
+    if (!SPX || !q || q.length < 3 || !SPX[f.family]) return null;
+    q = q.toLowerCase();
+    for (var i = 0; i < SPX[f.family].length; i++) if (SPX[f.family][i].toLowerCase().indexOf(q) !== -1) return SPX[f.family][i];
+    return null;
+  }
   var BY_NAME = {};
   var state = { status: null, group: null, sort: 'az', q: '', family: null, tab: 'description', route: 0, browse: false };
 
@@ -76,6 +100,7 @@
       if (g) return true;
       var c = f.routes.some(function (r) { return (r.couplet + r.letter).toLowerCase() === q; });
       if (c) return true;
+      if (speciesHit(f, q)) return true;
       return false;
     }
     return true;
@@ -190,7 +215,10 @@
       a.href = '#' + encodeURIComponent(f.family);
       if (state.family === f.family) a.setAttribute('aria-current', 'true');
       a.appendChild(el('span', 'dot ' + f.status));
-      a.appendChild(el('span', 'nm', f.family));
+      var nmBox = el('span', 'nm', f.family);
+      var hitName = state.q && f.family.toLowerCase().indexOf(state.q.toLowerCase()) === -1 ? speciesHit(f, state.q) : null;
+      if (hitName) { var hn = el('span', 'hint'); hn.appendChild(el('em', null, hitName)); nmBox.appendChild(hn); }
+      a.appendChild(nmBox);
       a.appendChild(el('span', 'sp', num(f.species)));
       li.appendChild(a);
       ul.appendChild(li);
@@ -288,6 +316,16 @@
     cards.appendChild(card('bad', 'FAMILY PAGES VERIFIED', num(t.verified), ' / ' + t.families,
       t.verified ? 'Checked by a co-author page by page' : 'No family page has been checked by a co-author yet'));
     wrap.appendChild(cards);
+
+    var spx = el('a', 'spx-cta');
+    spx.href = '#species';
+    var spxT = el('span', 't');
+    spxT.appendChild(el('span', 'k', 'SPECIES OF THE PHILIPPINES'));
+    spxT.appendChild(el('span', 'h', 'Build a species list by island'));
+    spxT.appendChild(el('span', 'd', 'Every species Kew accepts for the Philippines, with CDFP’s islands: for example, all the species known only from Palawan. Filter, open, download.'));
+    spx.appendChild(spxT);
+    spx.appendChild(el('span', 'arr', '→'));
+    wrap.appendChild(spx);
 
     wrap.appendChild(coverage());
 
@@ -390,6 +428,7 @@
     var p = el('div', 'panel');
     if (state.tab === 'description')  panelDescription(p, f);
     else if (state.tab === 'key')     panelKey(p, f);
+    else if (state.tab === 'species') panelSpecies(p, f);
     else if (state.tab === 'genera')  panelGenera(p, f);
     else if (state.tab === 'dist')    panelDistribution(p, f);
     else if (state.tab === 'cons')    panelConservation(p, f);
@@ -610,6 +649,637 @@
     p.appendChild(ol);
 
     if (f.description) p.appendChild(keyContrastNote(f, false));
+  }
+
+  /* ------------------------------------------------------------ species
+     Built by tools/build-species.js. The species list is Kew's World Checklist
+     of Vascular Plants; each species' island names come from CDFP (names only,
+     credited); GBIF records and photos are fetched live, here in the browser,
+     when a species is opened. One file per family, fetched on first use. */
+
+  var SPECIES = {};
+  function loadSpecies(fam) {
+    if (SPECIES[fam]) return SPECIES[fam];
+    SPECIES[fam] = fetch('data/species/' + encodeURIComponent(fam) + '.json' + (VERSION ? '?v=' + VERSION : ''))
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    SPECIES[fam].catch(function () { delete SPECIES[fam]; });
+    return SPECIES[fam];
+  }
+
+  // ---- GBIF, live
+  var GBIF = 'https://api.gbif.org/v1/';
+  var gbifCache = {};
+  /* GBIF sometimes answers 429 ("too many requests") or 5xx when busy; wait and
+     ask again twice before giving up, so a busy moment is not mistaken for
+     "no records". */
+  function gbifJson(url) {
+    if (!gbifCache[url]) {
+      var attempt = function (n) {
+        return fetch(url).then(function (r) {
+          if (r.ok) return r.json();
+          if ((r.status === 429 || r.status >= 500) && n < 2) {
+            return new Promise(function (res) { setTimeout(res, n ? 4000 : 1500); }).then(function () { return attempt(n + 1); });
+          }
+          throw new Error(r.status === 429 ? 'GBIF is busy' : 'GBIF ' + r.status);
+        });
+      };
+      gbifCache[url] = attempt(0);
+      gbifCache[url].catch(function () { delete gbifCache[url]; });
+    }
+    return gbifCache[url];
+  }
+  /** GBIF's own key for a name, or null when GBIF has no exact species match. */
+  function gbifKey(name) {
+    return gbifJson(GBIF + 'species/match?kingdom=Plantae&strict=true&name=' + encodeURIComponent(name)).then(function (m) {
+      return m && m.usageKey && m.rank === 'SPECIES' && (m.matchType === 'EXACT' || m.matchType === 'FUZZY') ? m.usageKey : null;
+    });
+  }
+  var PH_FILTER = '&country=PH&hasCoordinate=true&hasGeospatialIssue=false';
+  function gbifRecords(key, observations) {
+    return gbifJson(GBIF + 'occurrence/search?taxonKey=' + key + PH_FILTER + '&limit=300&basisOfRecord=' +
+      (observations ? 'HUMAN_OBSERVATION' : 'PRESERVED_SPECIMEN'));
+  }
+  function gbifPhotos(key) {
+    return gbifJson(GBIF + 'occurrence/search?taxonKey=' + key + '&country=PH&mediaType=StillImage&limit=12');
+  }
+
+  /* MD5, for GBIF's image cache, which addresses a photo by the MD5 of its
+     original URL (https://api.gbif.org/v1/image/cache/200x200/occurrence/<key>/media/<md5>).
+     Compact standard implementation (RFC 1321) over the UTF-8 bytes. */
+  function md5(str) {
+    var bytes = unescape(encodeURIComponent(str)), n = bytes.length;
+    var words = [], i;
+    for (i = 0; i < n; i++) words[i >> 2] |= bytes.charCodeAt(i) << ((i % 4) * 8);
+    words[n >> 2] |= 0x80 << ((n % 4) * 8);
+    words[(((n + 8) >> 6) + 1) * 16 - 2] = n * 8;
+    var S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21], K = [];
+    for (i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) | 0;
+    var a0 = 0x67452301, b0 = 0xefcdab89 | 0, c0 = 0x98badcfe | 0, d0 = 0x10325476;
+    for (var blk = 0; blk < words.length; blk += 16) {
+      var A = a0, B = b0, C = c0, D = d0;
+      for (i = 0; i < 64; i++) {
+        var F, g;
+        if (i < 16) { F = (B & C) | (~B & D); g = i; }
+        else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) % 16; }
+        else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) % 16; }
+        else { F = C ^ (B | ~D); g = (7 * i) % 16; }
+        var tmp = D; D = C; C = B;
+        var x = (A + F + K[i] + (words[blk + g] | 0)) | 0;
+        var s = S[(i >> 4) * 4 + (i % 4)];
+        B = (B + ((x << s) | (x >>> (32 - s)))) | 0;
+        A = tmp;
+      }
+      a0 = (a0 + A) | 0; b0 = (b0 + B) | 0; c0 = (c0 + C) | 0; d0 = (d0 + D) | 0;
+    }
+    return [a0, b0, c0, d0].map(function (v) {
+      var h = '';
+      for (var j = 0; j < 4; j++) h += ('0' + ((v >>> (j * 8)) & 255).toString(16)).slice(-2);
+      return h;
+    }).join('');
+  }
+  function licenceShort(u) {
+    if (!u) return 'licence unstated';
+    if (/publicdomain\/zero/.test(u)) return 'CC0';
+    var m = /licenses\/([a-z-]+)\/([0-9.]+)/.exec(u);
+    return m ? 'CC ' + m[1].toUpperCase() + ' ' + m[2] : u;
+  }
+
+  // ---- the species' own mini map: CDFP islands shaded, GBIF points on top
+  function speciesMiniMap(s) {
+    var M = DATA.map;
+    var vb = M.viewBox.split(' ').map(Number), W = vb[2], H = vb[3];
+    var svg = svgEl('svg', { viewBox: M.viewBox, class: 'phmap mini', role: 'img',
+      'aria-label': s.n + ': islands CDFP records it from, and GBIF record points' });
+    svg.appendChild(svgEl('rect', { x: 0, y: 0, width: W, height: H, class: 'mini-sea' }));
+    svg.appendChild(svgEl('path', { d: M.polys.join(''), class: 'base' }));
+    var shade = rampColour(0.55);
+    (s.ci || []).forEach(function (tok) {
+      (M.islands[tok] || []).forEach(function (pi) {
+        svg.appendChild(svgEl('path', { d: M.polys[pi], fill: shade, stroke: shade, class: 'hit static' }));
+      });
+    });
+    svg.appendChild(svgEl('path', { d: M.coast, class: 'coast' }));
+    svg.appendChild(svgEl('g', { class: 'dots' }));
+    return svg;
+  }
+  function plotRecords(svg, results) {
+    var P = DATA.map.projection, g = svg.querySelector('.dots');
+    g.textContent = '';
+    var seen = {};
+    results.forEach(function (r) {
+      if (r.decimalLatitude == null || r.decimalLongitude == null) return;
+      var x = Math.round((r.decimalLongitude - P.lon0) * P.k * P.px * 2) / 2, y = Math.round((P.lat0 - r.decimalLatitude) * P.px * 2) / 2;
+      if (seen[x + ',' + y]) return;
+      seen[x + ',' + y] = 1;
+      var c = svgEl('circle', { cx: x, cy: y, r: 5, class: r.basisOfRecord === 'PRESERVED_SPECIMEN' ? 'spec' : 'obs' });
+      c.appendChild(svgEl('title', null, (r.basisOfRecord === 'PRESERVED_SPECIMEN' ? 'Specimen' : 'Observation') +
+        (r.year ? ', ' + r.year : '') + (r.institutionCode ? ', ' + r.institutionCode : '') + (r.locality ? ' — ' + r.locality : '')));
+      g.appendChild(c);
+    });
+  }
+
+  function speciesDetail(s, fam, onIsland) {
+    var d = el('div', 'spdetail');
+    var left = el('div', 'spleft');
+    var mapWrap = el('div', 'spmap');
+    var svg = speciesMiniMap(s);
+    mapWrap.appendChild(svg);
+    left.appendChild(mapWrap);
+    var mapKey = el('div', 'spmapkey');
+    mapKey.innerHTML = '<span class="k isl"></span>islands, from CDFP &nbsp; <span class="k spec"></span>specimens &nbsp; <span class="k obs"></span>observations';
+    left.appendChild(mapKey);
+    d.appendChild(left);
+
+    var right = el('div', 'spright');
+    var facts = el('dl', 'spfacts');
+    function fact(k, v) { if (v == null || v === '') return; facts.appendChild(el('dt', null, k)); var dd = el('dd'); dd.innerHTML = v; facts.appendChild(dd); }
+    fact('Status in the Philippines', s.i ? 'Introduced' : s.e ? '<strong>Endemic</strong> — native nowhere else' : 'Native');
+    if (s.x) fact('Note', 'Kew records it as extinct in the Philippines');
+    if (s.dq) fact('Note', 'Kew marks its Philippine occurrence as doubtful');
+    fact('Life form', s.lf ? esc(s.lf) : null);
+    fact('Native range', s.rg ? esc(s.rg) : null);
+    fact('Islands', s.ci && s.ci.length
+      ? s.ci.map(function (t) { return '<button type="button" class="isl" data-t="' + esc(t) + '" title="Show the species of this family on ' + esc(titleCase(t)) + '">' + esc(titleCase(t)) + '</button>'; }).join(' · ') + ' <span class="cred">— CDFP</span>'
+      : (s.c === 'not listed' ? 'Not listed by CDFP, so no island record here' : 'CDFP gives no island for it'));
+    fact('CDFP', s.c === 'listed' ? 'Listed under this name'
+      : /^as /.test(s.c) ? 'Listed under the synonym <em>' + esc(s.c.slice(3)) + '</em>'
+      : 'Not listed — a name to check');
+    right.appendChild(facts);
+    if (onIsland) [].forEach.call(facts.querySelectorAll('button.isl'), function (b) {
+      b.addEventListener('click', function () { onIsland(b.getAttribute('data-t')); });
+    });
+
+    // GBIF, live
+    var gb = el('div', 'spgbif');
+    var gbHead = el('div', 'gbhead');
+    gbHead.appendChild(el('span', 'h', 'GBIF records in the Philippines'));
+    var tog = el('label', 'gbtoggle');
+    var cb = el('input'); cb.type = 'checkbox'; cb.checked = !!state.spobs;
+    tog.appendChild(cb);
+    tog.appendChild(document.createTextNode(' include field observations'));
+    gbHead.appendChild(tog);
+    gb.appendChild(gbHead);
+    var gbLine = el('p', 'gbline', 'Asking GBIF…');
+    gb.appendChild(gbLine);
+    var photos = el('div', 'gbphotos');
+    gb.appendChild(photos);
+    right.appendChild(gb);
+
+    var links = el('div', 'splinks');
+    function link(label, href) { var a = el('a', null, label); a.href = href; a.target = '_blank'; a.rel = 'noopener'; links.appendChild(a); return a; }
+    if (s.powo) link('Kew POWO', 'https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:' + s.powo);
+    var gLink = link('Search GBIF', 'https://www.gbif.org/species/search?q=' + encodeURIComponent(s.n));
+    var fp = BY_NAME[fam] && BY_NAME[fam].cdfp_url;
+    if (fp) link('CDFP family page', fp);
+    right.appendChild(links);
+    d.appendChild(right);
+
+    gbifKey(s.n).then(function (key) {
+      if (!key) { gbLine.textContent = 'GBIF has no exact match for this name, so no records are shown.'; return; }
+      gLink.textContent = 'GBIF species';
+      gLink.href = 'https://www.gbif.org/species/' + key;
+      link('All GBIF records in PH', 'https://www.gbif.org/occurrence/search?taxon_key=' + key + '&country=PH');
+      function showRecords() {
+        gbLine.textContent = 'Asking GBIF…';
+        var asks = [gbifRecords(key, false)];
+        // observations: the records when ticked, otherwise just their number
+        asks.push(cb.checked ? gbifRecords(key, true)
+          : gbifJson(GBIF + 'occurrence/search?taxonKey=' + key + PH_FILTER + '&limit=0&basisOfRecord=HUMAN_OBSERVATION'));
+        Promise.all(asks).then(function (res) {
+          var all = res[0].results.concat(cb.checked ? res[1].results : []);
+          plotRecords(svg, all);
+          var spec = res[0].count, obs = res[1].count;
+          var years = all.map(function (r) { return r.year; }).filter(Boolean);
+          var shown = all.length < spec + (cb.checked ? obs : 0) ? ' The map shows the first ' + num(all.length) + '.' : '';
+          gbLine.innerHTML = '<strong>' + num(spec) + '</strong> herbarium ' + plural(spec, 'specimen') +
+            ' and <strong>' + num(obs) + '</strong> field ' + plural(obs, 'observation') + ' with coordinates' +
+            (years.length ? '; mapped records span ' + Math.min.apply(null, years) + '–' + Math.max.apply(null, years) : '') + '.' +
+            (!cb.checked && obs ? ' Tick <em>include field observations</em> to map them.' : '') +
+            shown + ' <span class="warn">Not checked: GBIF records include misidentifications and misplaced points.</span>';
+        }).catch(function (e) { gbLine.textContent = 'GBIF did not answer (' + e.message + '). Try again later.'; });
+      }
+      cb.addEventListener('change', function () { state.spobs = cb.checked; showRecords(); });
+      showRecords();
+
+      gbifPhotos(key).then(function (res) {
+        var n = 0;
+        res.results.forEach(function (r) {
+          (r.media || []).forEach(function (m) {
+            if (n >= 8 || m.type !== 'StillImage' || !m.identifier) return;
+            n++;
+            var a = el('a', 'ph');
+            a.href = 'https://www.gbif.org/occurrence/' + r.key;
+            a.target = '_blank'; a.rel = 'noopener';
+            var img = el('img');
+            img.loading = 'lazy';
+            img.alt = s.n + ', ' + (r.basisOfRecord === 'PRESERVED_SPECIMEN' ? 'herbarium specimen' : 'photograph') + (r.year ? ', ' + r.year : '');
+            img.src = GBIF + 'image/cache/200x200/occurrence/' + r.key + '/media/' + md5(m.identifier);
+            // GBIF's image cache can refuse a burst of requests: retry once, then say so plainly
+            img.onerror = function () {
+              if (!img.dataset.retried) {
+                img.dataset.retried = '1';
+                var src = img.src;          // the cache refuses extra query text, so re-set the same address
+                img.removeAttribute('src');
+                setTimeout(function () { img.src = src; }, 2500);
+              } else {
+                a.classList.add('failed');
+                img.remove();
+                a.insertBefore(el('span', 'fail', 'Photo not available just now — open on GBIF'), a.firstChild);
+              }
+            };
+            a.appendChild(img);
+            var who = m.rightsHolder || m.creator || r.institutionCode || r.publisher || '';
+            a.appendChild(el('span', 'cap', (who ? '© ' + who + ' · ' : '') + licenceShort(m.license || r.license)));
+            a.title = (who ? '© ' + who + ', ' : '') + licenceShort(m.license || r.license) + '. Open this ' +
+              (r.basisOfRecord === 'PRESERVED_SPECIMEN' ? 'herbarium specimen' : 'observation') + ' on GBIF.';
+            photos.appendChild(a);
+          });
+        });
+        if (!n) photos.appendChild(el('p', 'nomap', 'No photographs on GBIF for this species in the Philippines.'));
+      }).catch(function () { /* photos are optional */ });
+    }).catch(function (e) { gbLine.textContent = 'GBIF did not answer (' + e.message + '). Try again later.'; });
+
+    return d;
+  }
+
+  function panelSpecies(p, f) {
+    var wait = el('p', 'keyintro', 'Loading the species of ' + f.family + '…');
+    p.appendChild(wait);
+    Promise.all([loadSpecies(f.family), loadSpeciesIndex()]).then(function (res) {
+      var data = res[0];
+      if (state.family !== f.family || state.tab !== 'species') return;
+      p.textContent = '';
+      renderSpecies(p, f, data);
+    }).catch(function (e) {
+      wait.textContent = 'The species list could not be loaded (' + e.message + ').';
+    });
+  }
+
+  function renderSpecies(p, f, data) {
+    var c = data.counts, sp = data.species;
+    var lead = el('p', 'keyintro');
+    if (!sp.length) {
+      lead.innerHTML = 'Kew’s World Checklist of Vascular Plants places no Philippine species in ' + esc(f.family) +
+        ' as this app defines it.' + (c.cdfp_only ? ' CDFP lists ' + c.cdfp_only + ' name' + (c.cdfp_only > 1 ? 's' : '') + ' here that Kew does not accept for the Philippines.' : '');
+      p.appendChild(lead);
+      p.appendChild(speciesSources());
+      return;
+    }
+    lead.innerHTML = 'Kew’s World Checklist of Vascular Plants accepts <strong>' + num(c.species) + '</strong> ' +
+      plural(c.species, 'species') + ' of ' + esc(f.family) + ' for the Philippines: ' + num(c.native) + ' native, <strong>' +
+      num(c.endemic) + '</strong> of them endemic' + (c.introduced ? ', and ' + num(c.introduced) + ' introduced' : '') + '. ' +
+      'Open a species for its islands, its GBIF records and photographs. ' +
+      '<a href="#species">Search all Philippine species by island →</a>';
+    p.appendChild(lead);
+    var cmp = el('p', 'keyintro');
+    cmp.innerHTML = 'Cross-check with CDFP, the source of this app’s family figures (' + num(f.species) + ' species): it lists ' +
+      num(c.cdfp_listed) + ' of Kew’s ' + num(c.species) + ', some under another name' +
+      (c.cdfp_only ? ', and ' + num(c.cdfp_only) + ' more that Kew does not accept for the Philippines' : '') +
+      '. Disagreements are worth a taxonomist’s look; neither list is assumed right.';
+    p.appendChild(cmp);
+    speciesExplorer(p, sp, { family: f.family });
+    p.appendChild(speciesSources());
+  }
+
+  /* The filterable species list: used on a family's Species tab (ctx.family set)
+     and on the flora-wide page (ctx.family null, where each row carries s.f). */
+  function speciesExplorer(p, sp, ctx) {
+    var flora = !ctx.family;
+    var famOf = function (s) { return s.f || ctx.family; };
+    // alphabetise hybrids by the name after the multiplication sign, as botanists do
+    var sortName = function (s) { return s.n.replace(/^×\s*/, ''); };
+    var byName = function (a, b) { return sortName(a).localeCompare(sortName(b)); };
+    var STATUS = [['all', 'All', function () { return true; }],
+      ['endemic', 'Endemic', function (s) { return s.e; }],
+      ['introduced', 'Introduced', function (s) { return s.i; }],
+      ['nocdfp', 'Not in CDFP', function (s) { return s.c === 'not listed'; }]];
+    var MODES = [['any', 'Found on'], ['only', 'Only on'], ['also', 'Also elsewhere'], ['every', 'On all of these']];
+    if (!state.spisl) state.spisl = [];
+    var filt = state.spf || 'all', sortBy = state.sps || 'az', mode = state.spmode || 'any';
+    var famFilter = flora ? (state.spfam || '') : '';
+    var PAGE = 200, shownMax = PAGE;
+
+    var panel = el('div', 'spfilter');
+    panel.setAttribute('role', 'search');
+
+    // row 1: search + sort
+    var r1 = el('div', 'fr');
+    var qWrap = el('div', 'fsearch');
+    qWrap.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4.5 4.5"/></svg>';
+    var q = el('input');
+    q.type = 'search';
+    q.placeholder = flora ? 'Filter by species, genus or family' : 'Filter by name';
+    q.setAttribute('aria-label', 'Filter species by name');
+    q.value = state.spq || '';
+    qWrap.appendChild(q);
+    r1.appendChild(qWrap);
+    var sortSel = el('select', 'fselect');
+    sortSel.setAttribute('aria-label', 'Sort species');
+    [['az', 'Sort: A–Z'], ['isl', 'Sort: most islands'], ['fewisl', 'Sort: fewest islands']]
+      .concat(flora ? [['fam', 'Sort: by family']] : []).forEach(function (o) {
+        var op = el('option', null, o[1]); op.value = o[0]; if (o[0] === sortBy) op.selected = true; sortSel.appendChild(op);
+      });
+    r1.appendChild(sortSel);
+    panel.appendChild(r1);
+
+    function segmented(label, items, current, onPick) {
+      var row = el('div', 'fr');
+      row.appendChild(el('span', 'flabel', label));
+      var seg = el('div', 'seg');
+      seg.setAttribute('role', 'group');
+      seg.setAttribute('aria-label', label);
+      items.forEach(function (it) {
+        var b = el('button', null);
+        b.type = 'button';
+        b.appendChild(document.createTextNode(it[1]));
+        if (it[2] != null) b.appendChild(el('span', 'n', num(it[2])));
+        b.setAttribute('aria-pressed', it[0] === current ? 'true' : 'false');
+        b.addEventListener('click', function () {
+          [].forEach.call(seg.children, function (x) { x.setAttribute('aria-pressed', 'false'); });
+          b.setAttribute('aria-pressed', 'true');
+          onPick(it[0]);
+        });
+        seg.appendChild(b);
+      });
+      row.appendChild(seg);
+      return row;
+    }
+    panel.appendChild(segmented('Status', STATUS.filter(function (s) { return s[0] === 'all' || sp.some(s[2]); })
+      .map(function (s) { return [s[0], s[1], sp.filter(s[2]).length]; }), filt,
+      function (v) { filt = v; state.spf = v; draw(true); }));
+
+    // flora-wide only: a family filter
+    if (flora) {
+      var famCount = {};
+      sp.forEach(function (s) { famCount[s.f] = (famCount[s.f] || 0) + 1; });
+      var rf = el('div', 'fr');
+      rf.appendChild(el('span', 'flabel', 'Family'));
+      var famSel = el('select', 'fselect');
+      famSel.setAttribute('aria-label', 'Filter by family');
+      var all = el('option', null, 'All families (' + Object.keys(famCount).length + ')'); all.value = ''; famSel.appendChild(all);
+      Object.keys(famCount).sort().forEach(function (fa) {
+        var op = el('option', null, fa + '  (' + num(famCount[fa]) + ')'); op.value = fa;
+        if (fa === famFilter) op.selected = true;
+        famSel.appendChild(op);
+      });
+      famSel.addEventListener('change', function () { famFilter = famSel.value; state.spfam = famFilter; draw(true); });
+      rf.appendChild(famSel);
+      panel.appendChild(rf);
+    }
+
+    // distribution - islands (from CDFP) and how to match them
+    var islCount = {};
+    sp.forEach(function (s) { s.ci.forEach(function (t) { islCount[t] = (islCount[t] || 0) + 1; }); });
+    var islands = Object.keys(islCount).sort(function (a, b) { return islCount[b] - islCount[a] || a.localeCompare(b); });
+    var r3 = el('div', 'fr fdist');
+    r3.appendChild(el('span', 'flabel', 'Islands'));
+    var distBox = el('div', 'fdistbox');
+    var picked = el('div', 'picked');
+    var add = el('select', 'fselect');
+    add.setAttribute('aria-label', 'Add an island to the filter');
+    distBox.appendChild(picked);
+    distBox.appendChild(add);
+    r3.appendChild(distBox);
+    panel.appendChild(r3);
+    var modeRow = el('div', 'fr fmode');
+    panel.appendChild(modeRow);
+    var modeHint = el('p', 'fhint');
+    panel.appendChild(modeHint);
+
+    function drawIslands() {
+      picked.textContent = '';
+      state.spisl.forEach(function (t) {
+        var b = el('button', 'ipick');
+        b.type = 'button';
+        b.appendChild(document.createTextNode(titleCase(t)));
+        b.appendChild(el('span', 'x', '×'));
+        b.setAttribute('aria-label', 'Remove ' + titleCase(t) + ' from the filter');
+        b.addEventListener('click', function () {
+          state.spisl = state.spisl.filter(function (x) { return x !== t; });
+          drawIslands(); draw(true);
+        });
+        picked.appendChild(b);
+      });
+      add.textContent = '';
+      var first = el('option', null, state.spisl.length ? '+ add another island' : 'Choose an island…');
+      first.value = '';
+      add.appendChild(first);
+      islands.forEach(function (t) {
+        if (state.spisl.indexOf(t) !== -1) return;
+        var op = el('option', null, titleCase(t) + '  (' + num(islCount[t]) + ')');
+        op.value = t;
+        add.appendChild(op);
+      });
+      modeRow.textContent = '';
+      modeHint.textContent = '';
+      if (!state.spisl.length) { modeRow.hidden = true; modeHint.hidden = true; return; }
+      modeRow.hidden = false; modeHint.hidden = false;
+      var modes = MODES.filter(function (m) { return m[0] !== 'every' || state.spisl.length > 1; });
+      if (!modes.some(function (m) { return m[0] === mode; })) mode = 'any';
+      var seg = segmented('Match', modes, mode, function (v) { mode = v; state.spmode = v; hint(); draw(true); });
+      [].slice.call(seg.childNodes).forEach(function (n) { modeRow.appendChild(n); });   // copy first: moving nodes empties the live list
+      hint();
+    }
+    function hint() {
+      var names = sentence(state.spisl.map(titleCase)).replace(/ and ([^ ]+)$/, (state.spisl.length > 1 && mode !== 'every' ? ' or ' : ' and ') + '$1');
+      modeHint.textContent = {
+        any: 'Species CDFP records from ' + names + ', whether or not they occur elsewhere.',
+        only: 'Species CDFP records from ' + names + ' and from no other island.',
+        also: 'Species CDFP records from ' + names + ' and from at least one other island as well.',
+        every: 'Species CDFP records from every one of ' + names + '.',
+      }[mode] + ' Island records are CDFP’s; nearby islets (for example Busuanga or Culion off Palawan) count as separate islands.';
+    }
+    add.addEventListener('change', function () {
+      if (!add.value) return;
+      state.spisl = state.spisl.concat([add.value]);
+      drawIslands(); draw(true);
+    });
+    drawIslands();
+    p.appendChild(panel);
+
+    // result line: count + download
+    var resRow = el('div', 'spresult');
+    var count = el('div', 'spcount');
+    resRow.appendChild(count);
+    var dl = el('button', 'dlbtn');
+    dl.type = 'button';
+    dl.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M5.5 8.5L10 13l4.5-4.5M4 16.5h12"/></svg>Download this list (CSV)';
+    resRow.appendChild(dl);
+    p.appendChild(resRow);
+    var list = el('ul', 'splist' + (flora ? ' flora' : ''));
+    p.appendChild(list);
+    var more = el('div', 'spmore');
+    p.appendChild(more);
+
+    function islandTest(s) {
+      var sel = state.spisl;
+      if (!sel.length) return true;
+      if (!s.ci.length) return false;
+      var hits = s.ci.filter(function (t) { return sel.indexOf(t) !== -1; }).length;
+      if (mode === 'any') return hits > 0;
+      if (mode === 'only') return hits > 0 && hits === s.ci.length;
+      if (mode === 'also') return hits > 0 && hits < s.ci.length;
+      if (mode === 'every') return sel.every(function (t) { return s.ci.indexOf(t) !== -1; });
+      return true;
+    }
+    var current = [];
+    var open = state.spopen || null;
+    function draw(reset) {
+      if (reset) shownMax = PAGE;
+      var needle = q.value.trim().toLowerCase();
+      var fn = STATUS.filter(function (x) { return x[0] === filt; })[0][2];
+      var rows = sp.filter(function (s) {
+        return fn(s) && (!famFilter || s.f === famFilter) && islandTest(s) &&
+          (!needle || s.n.toLowerCase().indexOf(needle) !== -1 || (flora && s.f.toLowerCase().indexOf(needle) !== -1));
+      });
+      if (sortBy === 'isl') rows = rows.slice().sort(function (a, b) { return b.ci.length - a.ci.length || byName(a, b); });
+      if (sortBy === 'fewisl') rows = rows.slice().sort(function (a, b) { return (a.ci.length || 999) - (b.ci.length || 999) || byName(a, b); });
+      if (sortBy === 'fam') rows = rows.slice().sort(function (a, b) { return a.f.localeCompare(b.f) || byName(a, b); });
+      if (sortBy === 'az') rows = rows.slice().sort(byName);
+      current = rows;
+      count.innerHTML = rows.length === sp.length ? '<strong>' + num(sp.length) + '</strong> species'
+        : '<strong>' + num(rows.length) + '</strong> of ' + num(sp.length) + ' species' +
+          (flora ? ' in ' + num(Object.keys(rows.reduce(function (m, s) { m[s.f] = 1; return m; }, {})).length) + ' ' +
+            plural(Object.keys(rows.reduce(function (m, s) { m[s.f] = 1; return m; }, {})).length, 'family', 'families') : '');
+      dl.disabled = !rows.length;
+      list.textContent = '';
+      rows.slice(0, shownMax).forEach(function (s) {
+        var key = famOf(s) + '|' + s.id;
+        var li = el('li', 'sprow' + (open === key ? ' open' : ''));
+        var b = el('button', 'sphead');
+        b.type = 'button';
+        b.setAttribute('aria-expanded', open === key ? 'true' : 'false');
+        var nm = el('span', 'spname');
+        nm.appendChild(el('em', null, s.n));
+        if (s.au) nm.appendChild(el('span', 'au', ' ' + s.au));
+        if (flora) nm.appendChild(el('span', 'fam', s.f));
+        b.appendChild(nm);
+        var tags = el('span', 'sptags');
+        if (s.e) tags.appendChild(el('span', 'tag end', 'endemic'));
+        if (s.i) tags.appendChild(el('span', 'tag intro', 'introduced'));
+        if (s.c === 'not listed') tags.appendChild(el('span', 'tag nocdfp', 'not in CDFP'));
+        b.appendChild(tags);
+        b.appendChild(el('span', 'sprec', s.ci.length ? s.ci.length + ' ' + plural(s.ci.length, 'island') : '—'));
+        b.addEventListener('click', function () {
+          open = open === key ? null : key;
+          state.spopen = open;
+          draw(false);
+        });
+        li.appendChild(b);
+        if (open === key) {
+          var det = speciesDetail(s, famOf(s), function (tok) {
+            if (state.spisl.indexOf(tok) === -1) state.spisl = state.spisl.concat([tok]);
+            drawIslands(); draw(true);
+            panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          });
+          if (flora) {
+            var fl = el('a', 'tofam', 'Open ' + s.f + ' →');
+            fl.href = '#' + encodeURIComponent(s.f) + '/species';
+            det.querySelector('.splinks').insertBefore(fl, det.querySelector('.splinks').firstChild);
+          }
+          li.appendChild(det);
+        }
+        list.appendChild(li);
+      });
+      if (!rows.length) list.appendChild(el('li', 'spempty', 'No species match these filters.'));
+      more.textContent = '';
+      if (rows.length > shownMax) {
+        var mb = el('button', 'dlbtn', 'Show ' + num(Math.min(PAGE, rows.length - shownMax)) + ' more');
+        mb.type = 'button';
+        mb.addEventListener('click', function () { shownMax += PAGE; draw(false); });
+        more.appendChild(mb);
+        var ab = el('button', 'linkbtn', 'show all ' + num(rows.length));
+        ab.type = 'button';
+        ab.addEventListener('click', function () { shownMax = rows.length; draw(false); });
+        more.appendChild(ab);
+        more.appendChild(el('span', 'spcount', 'showing ' + num(shownMax) + ' of ' + num(rows.length)));
+      }
+    }
+
+    // the current list as a spreadsheet file, with its sources written into it
+    dl.addEventListener('click', function () {
+      var cell = function (v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+      var desc = [ctx.family || (famFilter || 'All Philippine species')];
+      if (filt !== 'all') desc.push(STATUS.filter(function (x) { return x[0] === filt; })[0][1]);
+      if (state.spisl.length) desc.push(MODES.filter(function (m) { return m[0] === mode; })[0][1] + ' ' + state.spisl.map(titleCase).join(' + '));
+      if (q.value.trim()) desc.push('name contains "' + q.value.trim() + '"');
+      var lines = [
+        ['# ' + desc.join(' · ') + ' — ' + current.length + ' species. Exported ' + new Date().toISOString().slice(0, 10) + ' from the PH·FLORA working draft (not for citation).'],
+        ['# Species and status: World Checklist of Vascular Plants, Royal Botanic Gardens, Kew (CC BY 4.0). Islands: Co’s Digital Flora of the Philippines (Pelser, Barcelona & Nickrent, 2011 onwards).'],
+        ['species', 'authors', 'family', 'status', 'islands (CDFP)', 'CDFP listing', 'Kew POWO'],
+      ];
+      current.forEach(function (s) {
+        lines.push([s.n, s.au, famOf(s), s.i ? 'introduced' : s.e ? 'endemic' : 'native',
+          s.ci.map(titleCase).join('; '),
+          s.c === 'listed' ? 'listed' : /^as /.test(s.c) ? 'listed as ' + s.c.slice(3) : 'not listed',
+          s.powo ? 'https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:' + s.powo : '']);
+      });
+      var csv = '﻿' + lines.map(function (r) { return r.map(cell).join(','); }).join('\r\n');
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+      a.download = desc.join(' ').replace(/[^A-Za-z0-9+ -]+/g, '').replace(/\s+/g, '-').slice(0, 90) + '.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+    });
+
+    var t;
+    q.addEventListener('input', function () { clearTimeout(t); t = setTimeout(function () { state.spq = q.value; draw(true); }, 120); });
+    sortSel.addEventListener('change', function () { sortBy = sortSel.value; state.sps = sortBy; draw(true); });
+    draw(true);
+  }
+
+  // ------------------------------------------------ the flora-wide species page (#species)
+  var ALLSP = null;
+  function loadAllSpecies() {
+    if (!ALLSP) {
+      ALLSP = fetch('data/species-all.json' + (VERSION ? '?v=' + VERSION : ''))
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+      ALLSP.catch(function () { ALLSP = null; });
+    }
+    return ALLSP;
+  }
+  function renderAllSpecies() {
+    var stage = document.getElementById('stage');
+    stage.textContent = '';
+    document.title = 'Species of the Philippines — PH·FLORA';
+    var nav = el('nav', 'sheetnav');
+    var back = el('a', 'back', '← Overview'); back.href = '#';
+    nav.appendChild(back);
+    stage.appendChild(nav);
+    var sheet = el('article', 'sheet');
+    var head = el('div', 'sheet-head');
+    head.appendChild(el('div', 'eyebrow', 'All 294 families'));
+    head.appendChild(el('h1', null, 'Species of the Philippines'));
+    sheet.appendChild(head);
+    var p = el('div', 'panel');
+    var wait = el('p', 'keyintro', 'Loading 9,900 species…');
+    p.appendChild(wait);
+    sheet.appendChild(p);
+    stage.appendChild(sheet);
+    Promise.all([loadAllSpecies(), loadSpeciesIndex()]).then(function (res) {
+      if (!state.allsp) return;
+      var sp = res[0].species, T = null;
+      p.textContent = '';
+      var lead = el('p', 'keyintro');
+      var end = sp.filter(function (s) { return s.e; }).length, intro = sp.filter(function (s) { return s.i; }).length;
+      lead.innerHTML = 'Every species Kew’s World Checklist of Vascular Plants accepts for the Philippines — <strong>' + num(sp.length) +
+        '</strong>, of which <strong>' + num(end) + '</strong> are endemic and ' + num(intro) + ' introduced — placed in this ' +
+        'app’s 294 families. Choose islands below to build a list, for example every species known <em>only</em> from Palawan, ' +
+        'and download it.';
+      p.appendChild(lead);
+      speciesExplorer(p, sp, { family: null });
+      p.appendChild(speciesSources());
+    }).catch(function (e) { wait.textContent = 'The species list could not be loaded (' + e.message + ').'; });
+  }
+
+  function speciesSources() {
+    var s = el('div', 'srcline');
+    var src = SPX_META || {};
+    s.innerHTML = 'Species list: ' + esc(src.wcvp || 'World Checklist of Vascular Plants, Royal Botanic Gardens, Kew (CC BY 4.0)') + '. ' +
+      'Islands: ' + esc(src.cdfp || 'Co’s Digital Flora of the Philippines') + ' ' +
+      'Records and photographs: fetched live from <a href="https://www.gbif.org" target="_blank" rel="noopener">GBIF.org</a>, each photograph ' +
+      'credited to its owner under its own licence; they are shown as published and have not been checked.';
+    return s;
   }
 
   function panelGenera(p, f) {
@@ -1097,7 +1767,7 @@
 
     var tabs = el('div', 'tabs');
     tabs.setAttribute('role', 'tablist');
-    [['description', 'Description'], ['key', 'Key path'], ['genera', 'Genera'],
+    [['description', 'Description'], ['key', 'Key path'], ['species', 'Species'], ['genera', 'Genera'],
      ['dist', 'Distribution'], ['cons', 'Conservation'], ['sources', 'Sources']]
     .forEach(function (t) {
       var b = el('button', 'tab', t[1]);
@@ -1126,15 +1796,16 @@
     var y = stage.scrollTop, wy = window.scrollY;
     var open = !!(state.family && BY_NAME[state.family]);
     if (open) renderSheet(BY_NAME[state.family]);
+    else if (state.allsp) renderAllSpecies();
     else { document.title = 'Philippine Vascular Plant Families'; renderLanding(); }
 
     // Phone layout has three views: overview, the family list, one family.
-    document.body.classList.toggle('family-open', open);
+    document.body.classList.toggle('family-open', open || !!state.allsp);
     document.body.classList.toggle('browsing', !open && state.browse);
 
     // Jump to the top when the view changes; keep the reader's place when
     // only a tab or a route changes.
-    var view = open ? state.family : (state.browse ? '#families' : '');
+    var view = open ? state.family : (state.browse ? '#families' : state.allsp ? '#species' : '');
     if (keepScroll || view === lastView) { stage.scrollTop = y; window.scrollTo(0, wy); }
     else { stage.scrollTop = 0; window.scrollTo(0, 0); }
     lastView = view;
@@ -1157,11 +1828,12 @@
   function readHash() {
     var h = decodeURIComponent((location.hash || '').replace(/^#/, ''));
     state.browse = h === 'families';
-    if (!h || state.browse) { state.family = null; state.tab = 'description'; return; }
+    state.allsp = h === 'species';
+    if (!h || state.browse || state.allsp) { state.family = null; state.tab = 'description'; return; }
     var parts = h.split('/');
     var fam = parts[0];
     if (!BY_NAME[fam]) { state.family = null; return; }
-    if (fam !== state.family) state.route = 0;
+    if (fam !== state.family) { state.route = 0; state.spq = ''; state.spf = 'all'; state.spopen = null; }
     state.family = fam;
     state.tab = parts[1] || 'description';
   }
@@ -1259,6 +1931,14 @@
       para(esc(DATA.cdfp_citation) + ' Data generated ' + esc(DATA.generated) + '.')
     ]);
 
+    section('The Species tab', [
+      para('The species list is Kew’s <strong>World Checklist of Vascular Plants</strong> (CC BY 4.0): every species it accepts for the ' +
+        'Philippines, native or introduced. Island names come from <strong>Co’s Digital Flora of the Philippines</strong> (names only, ' +
+        'credited on every list), and each species says whether CDFP lists it. <strong>GBIF</strong> records and photographs are fetched ' +
+        'live when a species is opened: herbarium specimens by default, field observations on request. None of it has been checked, ' +
+        'and GBIF records include misidentifications and misplaced points.')
+    ]);
+
     section('Getting around', [
       para('Search by family, genus or couplet (for example <code>65a</code>); press <kbd>/</kbd> to jump to ' +
         'the search box and <kbd>Enter</kbd> to open the first match. On a family page, <strong>Prev</strong> ' +
@@ -1287,6 +1967,7 @@
       renderList(sorted(DATA.families.filter(matches)));
     }
     q.addEventListener('input', function () {
+      if (q.value.trim().length >= 3 && !SPX) loadSpeciesIndex().then(runSearch);
       if (PHONE.matches && q.value) showList();   // on a phone the results are the list view
       clearTimeout(t);
       t = setTimeout(runSearch, 90);
@@ -1295,7 +1976,13 @@
       if (e.key === 'Enter') {
         clearTimeout(t); runSearch();
         var hits = sorted(DATA.families.filter(matches));
-        if (hits.length) { location.hash = '#' + encodeURIComponent(hits[0].family); q.blur(); }
+        if (hits.length) {
+          var viaSpecies = hits[0].family.toLowerCase().indexOf(state.q.toLowerCase()) === -1 && speciesHit(hits[0], state.q);
+          if (viaSpecies) { state.spq = state.q; }
+          location.hash = '#' + encodeURIComponent(hits[0].family) + (viaSpecies ? '/species' : '');
+          if (viaSpecies) setTimeout(function () { state.spq = q.value.trim(); renderStage(true); }, 0);
+          q.blur();
+        }
       } else if (e.key === 'Escape') {
         q.value = ''; runSearch(); q.blur();
       }
@@ -1351,9 +2038,7 @@
 
   /* The data file is fetched with the same version stamp as this script, so a
      browser never pairs a new page with a stale cached data file. */
-  var script = document.currentScript;
-  var version = script && /[?&]v=([^&]+)/.exec(script.src);
-  fetch('data/families.json' + (version ? '?v=' + version[1] : ''))
+  fetch('data/families.json' + (VERSION ? '?v=' + VERSION : ''))
     .then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
