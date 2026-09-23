@@ -7,7 +7,7 @@
 
   var DATA = null;
   var BY_NAME = {};
-  var state = { status: null, group: null, sort: 'az', q: '', family: null, tab: 'description', route: 0 };
+  var state = { status: null, group: null, sort: 'az', q: '', family: null, tab: 'description', route: 0, browse: false };
 
   var STATUS_ORDER = ['complete', 'flagged', 'gap', 'examined', 'not-started'];
   var STATUS_LABEL = {
@@ -137,6 +137,16 @@
         state.sort = p[0]; render();
       }));
     });
+
+    // How many filters are on, shown on the phone's filter button and as a
+    // "Clear filters" link, so a narrowed list never looks like the whole flora.
+    var active = (state.status ? 1 : 0) + (state.group ? 1 : 0) + (state.sort !== 'az' ? 1 : 0) + (state.q ? 1 : 0);
+    var badge = document.getElementById('filter-badge');
+    badge.hidden = !active;
+    badge.textContent = String(active);
+    document.getElementById('clear-filters').hidden = !active;
+    var shown = DATA.families.filter(matches).length;
+    document.getElementById('facets-done').textContent = 'Show ' + shown + ' ' + plural(shown, 'family', 'families');
   }
 
   // ----------------------------------------------------------- family list
@@ -150,7 +160,26 @@
 
     if (!hits.length) {
       var li = el('li');
-      li.appendChild(el('div', 'empty', 'No family matches that. Try a genus name, a family name, or a couplet like 65a.'));
+      var box = el('div', 'empty');
+      var narrowed = state.status || state.group;
+      // Say plainly when the filters, not the search, are what hide a match.
+      var everywhere = narrowed && state.q ? DATA.families.filter(function (f) {
+        var s = state.status, g = state.group; state.status = null; state.group = null;
+        var ok = matches(f); state.status = s; state.group = g; return ok;
+      }).length : 0;
+      box.appendChild(el('p', null, everywhere
+        ? 'Nothing here, but ' + everywhere + ' ' + plural(everywhere, 'family', 'families') +
+          ' outside the current filter ' + (everywhere === 1 ? 'matches' : 'match') + '.'
+        : narrowed
+          ? 'No family matches with the current filters.'
+          : 'No family matches that. Try a genus name, a family name, or a couplet like 65a.'));
+      if (narrowed) {
+        var b = el('button', 'linkbtn', everywhere ? 'Search all families' : 'Clear filters');
+        b.type = 'button';
+        b.addEventListener('click', function () { state.status = null; state.group = null; render(); });
+        box.appendChild(b);
+      }
+      li.appendChild(box);
       ul.appendChild(li);
       return;
     }
@@ -197,7 +226,7 @@
         seg.title = STATUS_LABEL[code] + ': ' + num(n) + ' ' + unit + ' (' + pct.toFixed(1) + '%)';
         seg.setAttribute('aria-label', seg.title + '. Show these families.');
         if (pct >= 7) seg.appendChild(el('span', null, Math.round(pct) + '%'));
-        seg.addEventListener('click', function () { state.status = code; render(); openRailOnMobile(); });
+        seg.addEventListener('click', function () { state.status = code; render(); showList(); });
         track.appendChild(seg);
       });
       row.appendChild(track);
@@ -230,6 +259,11 @@
       'A successor to Copeland’s 1908 key. Every family carries its Philippine figures, ' +
       'the route the key takes to reach it, and — where a checkable source exists — a formal ' +
       'description with its caveats stated on the page.'));
+    var cta = el('a', 'browse-cta');
+    cta.href = '#families';
+    cta.appendChild(el('span', null, 'Browse all ' + t.families + ' families'));
+    cta.appendChild(el('span', 'arr', '→'));
+    wrap.appendChild(cta);
 
     var cards = el('div', 'cards');
     function card(cls, k, v, small, d) {
@@ -794,7 +828,7 @@
     var nav = el('nav', 'sheetnav');
     nav.setAttribute('aria-label', 'Family navigation');
     var back = el('a', 'back', '← All families');
-    back.href = '#';
+    back.href = '#families';
     nav.appendChild(back);
     var pos = el('span', 'pos', i === -1 ? 'not in the current filter' : (i + 1) + ' of ' + list.length);
     nav.appendChild(pos);
@@ -883,17 +917,23 @@
 
   // ---------------------------------------------------------------- render
 
+  var PHONE = window.matchMedia('(max-width: 900px)');
+
   var lastView = null;
   function renderStage(keepScroll) {
     var stage = document.getElementById('stage');
     var y = stage.scrollTop, wy = window.scrollY;
-    if (state.family && BY_NAME[state.family]) renderSheet(BY_NAME[state.family]);
+    var open = !!(state.family && BY_NAME[state.family]);
+    if (open) renderSheet(BY_NAME[state.family]);
     else { document.title = 'Philippine Vascular Plant Families'; renderLanding(); }
-    document.body.classList.toggle('family-open', !!(state.family && BY_NAME[state.family]));
 
-    // Jump to the top when the family changes; keep the reader's place when
+    // Phone layout has three views: overview, the family list, one family.
+    document.body.classList.toggle('family-open', open);
+    document.body.classList.toggle('browsing', !open && state.browse);
+
+    // Jump to the top when the view changes; keep the reader's place when
     // only a tab or a route changes.
-    var view = state.family || '';
+    var view = open ? state.family : (state.browse ? '#families' : '');
     if (keepScroll || view === lastView) { stage.scrollTop = y; window.scrollTo(0, wy); }
     else { stage.scrollTop = 0; window.scrollTo(0, 0); }
     lastView = view;
@@ -905,24 +945,123 @@
     renderStage();
   }
 
-  /* On a phone the rail stacks above the page; opening it scrolls to it. */
-  function openRailOnMobile() {
-    if (!window.matchMedia('(max-width: 900px)').matches) return;
-    document.body.classList.remove('family-open');
-    document.getElementById('rail').scrollIntoView({ block: 'start' });
+  /* Show the family list: on a phone that is its own view; on a wide screen
+     the list is always visible beside the page, so nothing needs to move. */
+  function showList() {
+    if (PHONE.matches && location.hash !== '#families') location.hash = '#families';
   }
 
   // ----------------------------------------------------------------- hash
 
   function readHash() {
     var h = decodeURIComponent((location.hash || '').replace(/^#/, ''));
-    if (!h) { state.family = null; state.tab = 'description'; return; }
+    state.browse = h === 'families';
+    if (!h || state.browse) { state.family = null; state.tab = 'description'; return; }
     var parts = h.split('/');
     var fam = parts[0];
     if (!BY_NAME[fam]) { state.family = null; return; }
     if (fam !== state.family) state.route = 0;
     state.family = fam;
     state.tab = parts[1] || 'description';
+  }
+
+  // ---------------------------------------------------------------- theme
+
+  function applyTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    var b = document.getElementById('theme-btn');
+    var next = t === 'dark' ? 'light' : 'dark';
+    b.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    b.title = 'Switch to ' + next + ' theme';
+  }
+
+  // ---------------------------------------------------------------- about
+
+  /* Everything numeric here is read from the data file, like the rest of the app. */
+  function renderAbout() {
+    var t = DATA.totals;
+    var box = document.getElementById('about-body');
+    box.textContent = '';
+
+    var head = el('div', 'about-head');
+    head.appendChild(el('h2', null, 'About this draft'));
+    head.id = 'about-title';
+    var x = el('button', 'iconbtn about-close', '×');
+    x.type = 'button';
+    x.setAttribute('aria-label', 'Close');
+    x.addEventListener('click', function () { document.getElementById('about').close(); });
+    head.appendChild(x);
+    box.appendChild(head);
+
+    function section(title, nodes) {
+      var s = el('section');
+      s.appendChild(el('h3', null, title));
+      nodes.forEach(function (n) { s.appendChild(n); });
+      box.appendChild(s);
+    }
+    function para(html) { var p = el('p'); p.innerHTML = html; return p; }
+
+    section('What this is', [
+      para('A working draft of a modern successor to E. B. Copeland’s 1908 key to the families of Philippine ' +
+        'vascular plants, rebuilt against the <strong>' + num(t.families) + ' families</strong> recognised by ' +
+        'Co’s Digital Flora of the Philippines (CDFP). For each family it shows the Philippine figures, every ' +
+        'route the key takes to reach it, and — where a checkable source exists — a condensed description.'),
+      para('<strong>It is not for citation.</strong> ' + (t.verified
+        ? t.verified + ' of ' + t.families + ' family pages have been checked by a co-author.'
+        : 'No family page has yet been checked by a co-author.'))
+    ]);
+
+    var st = el('dl', 'about-dl');
+    var STATUS_TEXT = {
+      'complete': 'A description compiled from a named Philippine or Malesian treatment, with no caveat outstanding.',
+      'flagged': 'A description is shown, but the page states what is wrong with its source — often that it comes from a flora of another region.',
+      'gap': 'No description could be compiled; the page says why.',
+      'examined': 'The available treatments were examined and nothing usable was found.',
+      'not-started': 'Not worked on yet. The figures and key path are still computed and reliable.'
+    };
+    STATUS_ORDER.forEach(function (code) {
+      if (!t.by_status[code]) return;
+      var dt = el('dt');
+      dt.appendChild(el('span', 'dot ' + code));
+      dt.appendChild(document.createTextNode(STATUS_LABEL[code] + ' '));
+      dt.appendChild(el('span', 'n', String(t.by_status[code])));
+      st.appendChild(dt);
+      st.appendChild(el('dd', null, STATUS_TEXT[code]));
+    });
+    section('The coloured dots: how far each description has got', [st]);
+
+    var pv = el('dl', 'about-dl');
+    [['copeland', 'Copeland 1908', 'Wording kept from Copeland’s key, with his own couplet number alongside.'],
+     ['rebuilt', 'Rebuilt for this key', 'Written for this key where modern classification required it, with a cited source.'],
+     ['coauthor', 'Co-author review', 'Supplied or rewritten by a co-author in review; each carries the comment it came from.']]
+      .forEach(function (o) {
+        var dt = el('dt', 'prov ' + o[0]);
+        dt.appendChild(el('span', 'sw'));
+        dt.appendChild(document.createTextNode(o[1]));
+        pv.appendChild(dt);
+        pv.appendChild(el('dd', null, o[2]));
+      });
+    var pvNodes = [pv];
+    var review = (t.key_review || [])[(t.key_review || []).length - 1];
+    if (review) {
+      pvNodes.push(para('<strong>' + num(review.couplets) + ' of ' + num(t.key_couplets) + ' couplets</strong> ' +
+        'came from co-author review (' + esc(review.reviewer.replace(/\s*\(.*\)$/, '')) + ', applied ' +
+        esc(review.date_display) + ').'));
+    }
+    section('The Key path tab: where each couplet’s wording comes from', pvNodes);
+
+    section('Where the numbers come from', [
+      para('Species, endemism, genera, islands and conservation listings are counted from CDFP’s species records. ' +
+        'Couplet numbers run through the whole key, as in the manuscript. Descriptions are condensed in our own ' +
+        'words from the treatment named on each page and are never reproduced verbatim.'),
+      para(esc(DATA.cdfp_citation) + ' Data generated ' + esc(DATA.generated) + '.')
+    ]);
+
+    section('Getting around', [
+      para('Search by family, genus or couplet (for example <code>65a</code>); press <kbd>/</kbd> to jump to ' +
+        'the search box and <kbd>Enter</kbd> to open the first match. On a family page, <strong>Prev</strong> ' +
+        'and <strong>Next</strong> step through whatever the list is currently filtered to.')
+    ]);
   }
 
   // ------------------------------------------------------------------ boot
@@ -934,40 +1073,68 @@
     document.getElementById('topstats').textContent =
       data.totals.families + ' FAMILIES · ' +
       ((data.totals.by_status.complete || 0) + (data.totals.by_status.flagged || 0)) + ' DESCRIBED · ' +
-      data.totals.verified + ' VERIFIED · ' + num(data.totals.endemic) + ' ENDEMIC SPECIES';
+      data.totals.verified + ' PAGES VERIFIED · ' + num(data.totals.endemic) + ' ENDEMIC SPECIES';
 
+    // ---- search
     var q = document.getElementById('q');
-    if (window.matchMedia('(max-width: 600px)').matches) q.placeholder = 'Family, genus, couplet…';
+    if (window.matchMedia('(max-width: 600px)').matches) q.placeholder = 'Search';
     var t;
+    function runSearch() {
+      state.q = q.value.trim();
+      renderFacets();
+      renderList(sorted(DATA.families.filter(matches)));
+    }
     q.addEventListener('input', function () {
+      if (PHONE.matches && q.value) showList();   // on a phone the results are the list view
       clearTimeout(t);
-      t = setTimeout(function () {
-        state.q = q.value.trim();
-        renderList(sorted(DATA.families.filter(matches)));
-      }, 90);
+      t = setTimeout(runSearch, 90);
     });
-
-    // "/" jumps to the search box, as on most reference sites; Escape clears it.
+    q.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        clearTimeout(t); runSearch();
+        var hits = sorted(DATA.families.filter(matches));
+        if (hits.length) { location.hash = '#' + encodeURIComponent(hits[0].family); q.blur(); }
+      } else if (e.key === 'Escape') {
+        q.value = ''; runSearch(); q.blur();
+      }
+    });
     document.addEventListener('keydown', function (e) {
       var typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
-      if (e.key === '/' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (e.key === '/' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && !document.getElementById('about').open) {
         e.preventDefault(); q.focus(); q.select();
-      } else if (e.key === 'Escape' && document.activeElement === q) {
-        q.value = ''; state.q = ''; renderList(sorted(DATA.families.filter(matches))); q.blur();
       }
     });
 
-    // On a phone the filters fold away behind one button.
+    // ---- filters: always shown on a wide screen, folded behind a button on a phone
+    var rail = document.getElementById('rail');
     var ft = document.getElementById('filter-toggle');
-    ft.addEventListener('click', function () {
-      var open = !document.getElementById('rail').classList.toggle('filters-closed');
+    function setFilters(open) {
+      rail.classList.toggle('filters-open', open);
       ft.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    ft.addEventListener('click', function () { setFilters(!rail.classList.contains('filters-open')); });
+    document.getElementById('facets-done').addEventListener('click', function () { setFilters(false); });
+    document.getElementById('clear-filters').addEventListener('click', function () {
+      state.status = null; state.group = null; state.sort = 'az';
+      q.value = ''; state.q = '';
+      render();
     });
-    if (window.matchMedia('(max-width: 900px)').matches) document.getElementById('rail').classList.add('filters-closed');
 
-    document.getElementById('about-btn').addEventListener('click', function () {
-      location.hash = '';
+    // ---- theme
+    applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
+    document.getElementById('theme-btn').addEventListener('click', function () {
+      var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      applyTheme(next);
+      try { localStorage.setItem('phflora-theme', next); } catch (e) {}
     });
+
+    // ---- about
+    var about = document.getElementById('about');
+    document.getElementById('about-btn').addEventListener('click', function () {
+      renderAbout();
+      if (about.showModal) about.showModal(); else about.setAttribute('open', '');
+    });
+    about.addEventListener('click', function (e) { if (e.target === about) about.close(); });
 
     document.querySelector('[data-home]').addEventListener('click', function (e) {
       e.preventDefault();
@@ -980,7 +1147,11 @@
     render();
   }
 
-  fetch('data/families.json')
+  /* The data file is fetched with the same version stamp as this script, so a
+     browser never pairs a new page with a stale cached data file. */
+  var script = document.currentScript;
+  var version = script && /[?&]v=([^&]+)/.exec(script.src);
+  fetch('data/families.json' + (version ? '?v=' + version[1] : ''))
     .then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();

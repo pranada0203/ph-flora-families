@@ -7,10 +7,23 @@
 <!-- working draft, shared by link only: ask search engines not to list it -->
 <title>Philippine Vascular Plant Families</title>
 <meta name="description" content="Family descriptions, key paths and Philippine figures for the 294 vascular plant families of the Philippines.">
+<meta name="color-scheme" content="dark light">
+<script>
+  /* Apply the saved (or system) theme before anything paints, so the page
+     never flashes the wrong colours. */
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem('phflora-theme'); } catch (e) {}
+    if (t !== 'light' && t !== 'dark') {
+      t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    }
+    document.documentElement.setAttribute('data-theme', t);
+  })();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Work+Sans:wght@300;400;500;600&display=swap">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=506b1aef48">
 </head>
 <body>
 
@@ -19,15 +32,27 @@
   <div class="topstats" id="topstats"></div>
   <div class="topsearch">
     <label class="sr-only" for="q">Search families, genera or couplets</label>
-    <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="Search family, genus or couplet…">
-    <kbd class="kbd" aria-hidden="true">/</kbd>
+    <svg class="search-ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4.5 4.5"/></svg>
+    <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="Search family, genus or couplet" title="Search (shortcut: /)">
   </div>
-  <button type="button" class="ghost" id="about-btn"><span class="long">About this draft</span><span class="short">About</span></button>
+  <button type="button" class="iconbtn" id="theme-btn" aria-label="Switch to light theme" title="Switch to light theme">
+    <svg class="ico-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.6"/><path d="M10 1.8v2.4M10 15.8v2.4M1.8 10h2.4M15.8 10h2.4M4.2 4.2l1.7 1.7M14.1 14.1l1.7 1.7M4.2 15.8l1.7-1.7M14.1 5.9l1.7-1.7"/></svg>
+    <svg class="ico-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M16.2 12.6A7 7 0 0 1 7.4 3.8a7 7 0 1 0 8.8 8.8z"/></svg>
+  </button>
+  <button type="button" class="ghost" id="about-btn" aria-haspopup="dialog">About</button>
 </header>
 
 <main class="shell">
 
   <nav class="rail" id="rail" aria-label="Filters and family list">
+    <div class="rail-tools">
+      <span class="rail-count" id="rail-count"></span>
+      <button type="button" class="linkbtn" id="clear-filters" hidden>Clear filters</button>
+      <button type="button" class="filter-toggle" id="filter-toggle" aria-expanded="false" aria-controls="facets">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M6 10h8M8.5 15h3"/></svg>
+        <span>Filter &amp; sort</span><span class="badge" id="filter-badge" hidden></span>
+      </button>
+    </div>
     <div class="facets" id="facets">
       <div class="facet">
         <div class="facet-head">Description status</div>
@@ -41,10 +66,7 @@
         <div class="facet-head">Sort</div>
         <div class="chips" id="facet-sort"></div>
       </div>
-    </div>
-    <div class="rail-count">
-      <span id="rail-count"></span>
-      <button type="button" class="filter-toggle" id="filter-toggle" aria-expanded="false" aria-controls="facets">Filter &amp; sort</button>
+      <button type="button" class="facets-done" id="facets-done">Show families</button>
     </div>
     <ul class="famlist" id="famlist"></ul>
   </nav>
@@ -55,6 +77,10 @@
 
 </main>
 
-<script src="js/app.js"></script>
+<dialog class="about" id="about" aria-labelledby="about-title">
+  <div class="about-inner" id="about-body"></div>
+</dialog>
+
+<script src="js/app.js?v=506b1aef48"></script>
 </body>
 </html>
