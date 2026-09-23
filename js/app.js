@@ -331,11 +331,15 @@
 
     wrap.appendChild(el('h2', null, 'Read this first'));
     var p = el('p', 'note');
+    var noFm = DATA.families.filter(function (f) { return f.status !== 'complete' && f.no_malesian_treatment; });
+    var noFmEnd = noFm.reduce(function (n, f) { return n + (f.endemic || 0); }, 0);
+    var under = t.endemics_under_flag || 0;
     p.innerHTML =
       '<strong>' + t.flagged_endemic_percent + '% of Philippine endemics</strong> sit in families whose description ' +
       'is flagged, missing, or drawn from a flora of another region. That is not a gap in the data — it is the ' +
-      'state of the literature: Flora Malesiana never treated most of them. Every affected family says so at the ' +
-      'top of its own page, in red or amber, before you read a word of the description. ' +
+      'state of the literature: ' + num(noFmEnd) + ' of those ' + num(under) + ' endemics (' +
+      (under ? (100 * noFmEnd / under).toFixed(0) : 0) + '%) are in the ' + noFm.length + ' families Flora Malesiana has never treated. ' +
+      'Every affected family says so in a banner at the top of its own page, before you read a word of the description. ' +
       (t.verified
         ? 'Only pages marked as verified have been checked by a co-author.'
         : 'No family page has been verified by a co-author, so nothing here should be cited yet.');
@@ -388,6 +392,9 @@
       'on each family page and are never reproduced verbatim. Key paths are computed from the key itself. ' +
       'Data generated ' + DATA.generated + '.';
     wrap.appendChild(p3);
+    var cr = el('a', 'crlink', 'Every source, its version and terms, the acknowledgements, rights and disclaimer →');
+    cr.href = '#credits';
+    wrap.appendChild(cr);
 
     stage.appendChild(wrap);
   }
@@ -939,7 +946,7 @@
       return;
     }
     lead.innerHTML = 'Kew’s World Checklist of Vascular Plants accepts <strong>' + num(c.species) + '</strong> ' +
-      plural(c.species, 'species') + ' of ' + esc(f.family) + ' for the Philippines: ' + num(c.native) + ' native, <strong>' +
+      plural(c.species, 'species') + ' of ' + esc(f.family) + ' (as this app defines the family) for the Philippines: ' + num(c.native) + ' native, <strong>' +
       num(c.endemic) + '</strong> of them endemic' + (c.introduced ? ', and ' + num(c.introduced) + ' introduced' : '') + '. ' +
       'Open a species for its islands, its GBIF records and photographs. ' +
       '<a href="#species">Search all Philippine species by island →</a>';
@@ -1208,7 +1215,7 @@
       if (q.value.trim()) desc.push('name contains "' + q.value.trim() + '"');
       var lines = [
         ['# ' + desc.join(' · ') + ' — ' + current.length + ' species. Exported ' + new Date().toISOString().slice(0, 10) + ' from the PH·FLORA working draft (not for citation).'],
-        ['# Species and status: World Checklist of Vascular Plants, Royal Botanic Gardens, Kew (CC BY 4.0). Islands: Co’s Digital Flora of the Philippines (Pelser, Barcelona & Nickrent, 2011 onwards).'],
+        ['# Species and status: World Checklist of Vascular Plants, Royal Botanic Gardens, Kew (version 16, CC BY 3.0). Islands: Co’s Digital Flora of the Philippines (Pelser, Barcelona & Nickrent, 2011 onwards).'],
         ['species', 'authors', 'family', 'status', 'islands (CDFP)', 'CDFP listing', 'Kew POWO'],
       ];
       current.forEach(function (s) {
@@ -1281,10 +1288,11 @@
   function speciesSources() {
     var s = el('div', 'srcline');
     var src = SPX_META || {};
-    s.innerHTML = 'Species list: ' + esc(src.wcvp || 'World Checklist of Vascular Plants, Royal Botanic Gardens, Kew (CC BY 4.0)') + '. ' +
+    s.innerHTML = 'Species list: ' + esc(src.wcvp || 'World Checklist of Vascular Plants, Royal Botanic Gardens, Kew (version 16, CC BY 3.0)') + '. ' +
       'Islands: ' + esc(src.cdfp || 'Co’s Digital Flora of the Philippines') + ' ' +
       'Records and photographs: fetched live from <a href="https://www.gbif.org" target="_blank" rel="noopener">GBIF.org</a>, each photograph ' +
-      'credited to its owner under its own licence; they are shown as published and have not been checked.';
+      'credited to its owner under its own licence; they are shown as published and have not been checked. ' +
+      '<a href="#credits">All sources and terms →</a>';
     return s;
   }
 
@@ -1805,8 +1813,9 @@
     }
 
     var src = el('div', 'srcline');
-    src.textContent = 'Conservation figures are as CDFP states them, normalised only to strip the assessor ' +
-      'parenthetical. They are not our own assessments.';
+    src.textContent = 'Conservation figures are as CDFP states them. One category written several ways (with the assessor, a ' +
+      'criteria code, a trailing word or different casing) is counted once under that category; an assessment naming ' +
+      'more than one category is kept exactly as CDFP wrote it. They are not our own assessments, and not an official list.';
     p.appendChild(src);
   }
 
@@ -1962,15 +1971,16 @@
     var open = !!(state.family && BY_NAME[state.family]);
     if (open) renderSheet(BY_NAME[state.family]);
     else if (state.allsp) renderAllSpecies();
+    else if (state.credits) renderCredits();
     else { document.title = 'Philippine Vascular Plant Families'; renderLanding(); }
 
     // Phone layout has three views: overview, the family list, one family.
-    document.body.classList.toggle('family-open', open || !!state.allsp);
+    document.body.classList.toggle('family-open', open || !!state.allsp || !!state.credits);
     document.body.classList.toggle('browsing', !open && state.browse);
 
     // Jump to the top when the view changes; keep the reader's place when
     // only a tab or a route changes.
-    var view = open ? state.family : (state.browse ? '#families' : state.allsp ? '#species' : '');
+    var view = open ? state.family : (state.browse ? '#families' : state.allsp ? '#species' : state.credits ? '#credits' : '');
     if (keepScroll || view === lastView) { stage.scrollTop = y; window.scrollTo(0, wy); }
     else { stage.scrollTop = 0; window.scrollTo(0, 0); }
     lastView = view;
@@ -1994,13 +2004,169 @@
     var h = decodeURIComponent((location.hash || '').replace(/^#/, ''));
     state.browse = h === 'families';
     state.allsp = h === 'species';
-    if (!h || state.browse || state.allsp) { state.family = null; state.tab = 'description'; return; }
+    state.credits = h === 'credits';
+    if (!h || state.browse || state.allsp || state.credits) { state.family = null; state.tab = 'description'; return; }
     var parts = h.split('/');
     var fam = parts[0];
     if (!BY_NAME[fam]) { state.family = null; return; }
     if (fam !== state.family) { state.route = 0; state.spq = ''; state.spf = 'all'; state.spopen = null; }
     state.family = fam;
     state.tab = parts[1] || 'description';
+  }
+
+  // ------------------------------------------------ sources, credits, rights, disclaimer (#credits)
+
+  /* Two things here are the authors' to decide and are left empty until they do:
+     who is thanked, and the licence for the authors' own work. Fill them in here;
+     the page shows a plain "not yet decided" until then. See docs/app-credits.md. */
+  var CREDITS = {
+    acknowledgements: null,   // e.g. ['Joaquin Almoro, for …', '…']
+    licence: null             // e.g. { name: 'CC BY 4.0', url: 'https://creativecommons.org/licenses/by/4.0/' }
+  };
+
+  function renderCredits() {
+    var stage = document.getElementById('stage');
+    stage.textContent = '';
+    document.title = 'Sources & credits — PH·FLORA';
+    var nav = el('nav', 'sheetnav');
+    var back = el('a', 'back', '← Overview'); back.href = '#';
+    nav.appendChild(back);
+    stage.appendChild(nav);
+    var sheet = el('article', 'sheet credits');
+    var head = el('div', 'sheet-head');
+    head.appendChild(el('div', 'eyebrow', 'Disclaimer · data sources · acknowledgements · rights'));
+    head.appendChild(el('h1', null, 'Sources & credits'));
+    sheet.appendChild(head);
+    var p = el('div', 'panel');
+    sheet.appendChild(p);
+    stage.appendChild(sheet);
+
+    var t = DATA.totals;
+    function h2(s, id) { var h = el('h2', 'cr-h', s); if (id) h.id = id; p.appendChild(h); }
+    function para(html, cls) { var x = el('p', cls || 'cr-p'); x.innerHTML = html; p.appendChild(x); return x; }
+    var ext = function (url, label) { return '<a href="' + url + '" target="_blank" rel="noopener">' + esc(label || url.replace(/^https?:\/\//, '')) + '</a>'; };
+
+    // what the descriptions were condensed from, counted from the data
+    var described = DATA.families.filter(function (f) { return (f.status === 'complete' || f.status === 'flagged') && f.description_source; });
+    var fm = described.filter(function (f) { return /Flora Malesiana/i.test(f.description_source.citation || ''); }).length;
+    var foc = described.filter(function (f) { return /Flora of China/i.test(f.description_source.citation || ''); }).length;
+    var other = described.length - fm - foc;
+    var accessed = DATA.families.map(function (f) { return f.cdfp_accessed; }).filter(Boolean).sort();
+    var acc = accessed.length ? (accessed[0] === accessed[accessed.length - 1] ? accessed[0] : accessed[0] + ' to ' + accessed[accessed.length - 1]) : '';
+    var review = (t.key_review || [])[(t.key_review || []).length - 1];
+    var ref = function (id) { return (DATA.core_references || []).filter(function (r) { return r.id === id; })[0] || { citation: '' }; };
+
+    // ---- disclaimer first: it is what a reader most needs
+    h2('Read before using', 'disclaimer');
+    var dl = el('ul', 'cr-list');
+    [
+      '<strong>This is a working draft, not a publication, and it is not for citation.</strong> ' +
+        (t.verified ? t.verified + ' of ' + t.families + ' family pages have' : 'None of the ' + t.families + ' family pages has') +
+        ' been checked page by page by a co-author.',
+      '<strong>The key is under revision.</strong> ' + (review ? 'Its latest co-author review was applied ' + esc(review.date_display) + ', and more is expected. ' : '') +
+        'Confirm any identification against a flora and, where you can, a specimen.',
+      '<strong>Descriptions are condensed</strong> in our own words from the treatment named on each page. Where that treatment is a flora of ' +
+        'another region, or has another problem, the page says so in a banner above the description.',
+      '<strong>Conservation figures are CDFP’s</strong>, as CDFP states them. They are not our assessments and not an official list: for ' +
+        'that, consult the current DENR Administrative Order and the IUCN Red List.',
+      '<strong>The Species lab is experimental.</strong> It joins Kew’s checklist to CDFP’s island names automatically, and the two ' +
+        'sources often disagree about how many species a family has. No co-author has checked it.',
+      '<strong>GBIF records and photographs</strong> are shown as their publishers put them on GBIF. They have not been checked; some are ' +
+        'misidentified, and some points are misplaced or deliberately blurred.',
+      '<strong>The maps are schematic.</strong> Island shapes are simplified from Natural Earth, and the scale bar is exact only near 12.5°N. ' +
+        'A boundary or name drawn on a map implies no position on any territorial question.',
+      'Everything here is provided as it is, without warranty of any kind. Corrections are welcome and are the point of publishing a draft.'
+    ].forEach(function (h) { var li = el('li'); li.innerHTML = h; dl.appendChild(li); });
+    p.appendChild(dl);
+
+    // ---- data sources
+    h2('Data sources', 'sources');
+    para('Each source is listed with what this app takes from it, the version used, and the terms it comes under. Nothing from a ' +
+      'source is used beyond what its row says.', 'cr-lead');
+    var tbl = el('div', 'cr-sources');
+    function source(name, use, version, terms) {
+      var row = el('div', 'cr-src');
+      var a = el('div', 'cr-name'); a.innerHTML = name; row.appendChild(a);
+      var b = el('div', 'cr-body');
+      var u = el('p'); u.innerHTML = use; b.appendChild(u);
+      if (version) { var v = el('p', 'cr-meta'); v.innerHTML = '<span>Version</span> ' + version; b.appendChild(v); }
+      var tm = el('p', 'cr-meta'); tm.innerHTML = '<span>Terms</span> ' + terms; b.appendChild(tm);
+      row.appendChild(b);
+      tbl.appendChild(row);
+    }
+    source('Co’s Digital Flora of the Philippines (CDFP)',
+      esc(ref('CDFP').citation) + '. ' + ext('https://www.philippineplants.org') + '. The ' + num(t.families) + ' families this app is built on, and ' +
+        'every Philippine figure on a family page: species, endemics, genera, islands, elevations and conservation listings, counted from ' +
+        'CDFP’s species records. In the Species lab, the island names CDFP gives for each species. CDFP’s own text, notes and photographs are not reproduced.',
+      acc ? 'Accessed ' + esc(acc) : '',
+      'CDFP’s content belongs to its editors and contributors. Figures are our counts of its records; island names are shown per species with this credit.');
+    source('Copeland (1908)',
+      esc(ref('COPELAND-1908').citation) + ' The starting point of the key: couplets inherited from it keep his wording and his own number.',
+      'Third edition, 1908',
+      'Public domain.');
+    source('Flora Malesiana',
+      'The source of ' + num(fm) + ' family descriptions, condensed in our own words and never reproduced verbatim. Each family page cites the volume and pages used.',
+      'Various volumes; cited per family',
+      'Copyright remains with its authors and publishers. Only facts are taken, restated in our words, with a citation.');
+    source('Flora of China (efloras.org)',
+      'The source of ' + num(foc) + ' family descriptions where Flora Malesiana has no treatment, each flagged on its page as describing plants ' +
+        'of another region. Condensed in our own words; each page cites the volume and page. ' + ext('http://www.efloras.org'),
+      'Online edition; accessed per family',
+      'Copyright remains with its authors and publishers. Only facts are taken, restated in our words, with a citation.');
+    if (other > 0) source('Other treatments', num(other) + ' family descriptions from other treatments, each cited on its page.', '', 'As stated on each page.');
+    source('Classification',
+      esc(ref('APG-IV').citation) + '<br>' + esc(ref('PPG-I').citation) + '<br>The order and clade placed above each family.',
+      'APG IV (2016); PPG I (2016)',
+      'Published papers, cited.');
+    source('World Checklist of Vascular Plants (WCVP)',
+      'Royal Botanic Gardens, Kew. ' + ext('https://powo.science.kew.org', 'powo.science.kew.org') + '. In the Species lab only: the species ' +
+        'accepted for the Philippines, their authors, whether native, endemic or introduced, life form, and the link to each species on POWO. ' +
+        '<em>Changed by this app:</em> filtered to the Philippines and each species placed into one of CDFP’s families.',
+      'Version 16, extracted 4 June 2026',
+      ext('https://creativecommons.org/licenses/by/3.0/', 'Creative Commons Attribution 3.0') + ' (CC BY 3.0).');
+    source('GBIF',
+      'In the Species lab only: occurrence records and photographs, fetched live from ' + ext('https://www.gbif.org', 'GBIF.org') +
+        ' when a species is opened, with a link back to each record. Nothing from GBIF is stored in this app.',
+      'Live at the time of viewing',
+      'Each record and photograph is under the licence its publisher chose (CC0, CC BY or CC BY-NC), credited to its creator where it is shown.');
+    source('Natural Earth',
+      'Coastlines and provinces for the distribution maps, from the 1:10m admin-1 and geography-regions layers; simplified and projected by this app. ' +
+        'Made with Natural Earth. ' + ext('https://www.naturalearthdata.com'),
+      '1:10m',
+      'Public domain.');
+    source('Typefaces',
+      'Space Grotesk, Work Sans, IBM Plex Mono and Instrument Serif, served by Google Fonts.',
+      '',
+      ext('https://openfontlicense.org', 'SIL Open Font License 1.1') + '.');
+    p.appendChild(tbl);
+
+    // ---- acknowledgements
+    h2('Acknowledgements', 'acknowledgements');
+    if (CREDITS.acknowledgements && CREDITS.acknowledgements.length) {
+      CREDITS.acknowledgements.forEach(function (a) { para(esc(a)); });
+    } else {
+      para('The authors’ acknowledgements will appear here.', 'cr-pending');
+    }
+    para('This work stands on Co’s Digital Flora of the Philippines and on everyone who has collected, named and recorded the ' +
+      'plants it lists; on E. B. Copeland’s 1908 key; and on the authors of the floras each family page cites.');
+
+    // ---- rights
+    h2('Rights', 'rights');
+    para('Material from the sources above stays under its owners’ terms, as listed. What is new here is the authors’ own work: ' +
+      'the revised key, the condensed descriptions, the compilation of figures, and this app.');
+    if (CREDITS.licence) {
+      para('The authors’ own work is shared under ' + ext(CREDITS.licence.url, CREDITS.licence.name) + '.');
+    } else {
+      para('A licence for the authors’ own work has not been chosen yet. Until it is, please ask before reusing it.', 'cr-pending');
+    }
+
+    // ---- privacy, briefly: it is part of what a visitor agrees to by opening the page
+    h2('Privacy', 'privacy');
+    para('This app sets no cookies, runs no analytics and asks for nothing. It remembers your light or dark choice in your own browser. ' +
+      'Opening it loads typefaces from Google Fonts; opening a species in the Species lab asks GBIF for its records and photographs. ' +
+      'The site is hosted on GitHub Pages. Each of those services sees your visit as it would any other.');
+
+    para('Data generated ' + esc(DATA.generated) + '.', 'cr-foot');
   }
 
   // ---------------------------------------------------------------- theme
@@ -2097,12 +2263,17 @@
     ]);
 
     section('The Species lab (experimental)', [
-      para('The species list is Kew’s <strong>World Checklist of Vascular Plants</strong> (CC BY 4.0): every species it accepts for the ' +
+      para('The species list is Kew’s <strong>World Checklist of Vascular Plants</strong> (version 16, CC BY 3.0): every species it accepts for the ' +
         'Philippines, native or introduced. Island names come from <strong>Co’s Digital Flora of the Philippines</strong> (names only, ' +
         'credited on every list), and each species says whether CDFP lists it. <strong>GBIF</strong> records and photographs are fetched ' +
         'live when a species is opened: herbarium specimens by default, field observations on request. None of it has been checked, ' +
         'and GBIF records include misidentifications and misplaced points.')
     ]);
+
+    var crp = para('<a href="#credits">Sources &amp; credits →</a> Every data source with its version and terms, the ' +
+      'acknowledgements, the rights in this work, and what it should not be used for.');
+    crp.querySelector('a').addEventListener('click', function () { document.getElementById('about').close(); });
+    section('Sources, rights and disclaimer', [crp]);
 
     section('Getting around', [
       para('Search by family, genus or couplet (for example <code>65a</code>); press <kbd>/</kbd> to jump to ' +
@@ -2119,7 +2290,7 @@
 
     document.getElementById('topstats').textContent =
       data.totals.families + ' FAMILIES · ' +
-      ((data.totals.by_status.complete || 0) + (data.totals.by_status.flagged || 0)) + ' DESCRIBED · ' +
+      ((data.totals.by_status.complete || 0) + (data.totals.by_status.flagged || 0)) + ' WITH A DESCRIPTION · ' +
       data.totals.verified + ' PAGES VERIFIED · ' + num(data.totals.endemic) + ' ENDEMIC SPECIES';
 
     // ---- search

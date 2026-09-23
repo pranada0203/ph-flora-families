@@ -1309,3 +1309,43 @@ dialog.about::backdrop { background: rgba(8, 10, 6, 0.62); }
 @media (max-width: 600px) {
   .labbanner { flex-direction: column; gap: 8px; }
 }
+
+/* Sources & credits (#credits) */
+.credits .panel { max-width: 860px; }
+.cr-h {
+  margin: 34px 0 12px; font-family: var(--serif); font-weight: 400; font-size: 27px;
+  color: var(--paper-fg); scroll-margin-top: 70px;
+}
+.cr-h:first-child { margin-top: 0; }
+.cr-p, .cr-lead { max-width: 68ch; margin: 0 0 12px; font-size: 14.5px; line-height: 1.7; color: var(--paper-body); }
+.cr-lead { color: var(--paper-mute); font-size: 13.5px; }
+.cr-p a, .cr-list a, .cr-src a { color: var(--brick); }
+.cr-list { margin: 0; padding: 0; list-style: none; max-width: 72ch; }
+.cr-list li {
+  position: relative; padding: 9px 0 9px 22px; border-bottom: 1px solid var(--paper-line);
+  font-size: 14px; line-height: 1.65; color: var(--paper-body);
+}
+.cr-list li::before { content: ''; position: absolute; left: 3px; top: 17px; width: 7px; height: 7px; border-radius: 50%; background: var(--gold); }
+.cr-list li:first-child::before { background: var(--brick); }
+.cr-list strong { color: var(--paper-fg); }
+.cr-sources { border-top: 1px solid var(--paper-line); }
+.cr-src { display: grid; grid-template-columns: 210px 1fr; gap: 18px; padding: 16px 0; border-bottom: 1px solid var(--paper-line); }
+.cr-name { font-family: var(--sans); font-weight: 500; font-size: 14.5px; line-height: 1.4; color: var(--paper-fg); }
+.cr-body p { margin: 0 0 6px; font-size: 13.5px; line-height: 1.65; color: var(--paper-body); }
+.cr-body .cr-meta { font-size: 12.5px; color: var(--paper-mute); }
+.cr-meta span {
+  display: inline-block; min-width: 58px; font-family: var(--mono); font-size: 9.5px; letter-spacing: 1.2px;
+  text-transform: uppercase; color: var(--paper-faint);
+}
+.cr-pending {
+  max-width: 68ch; margin: 0 0 12px; padding: 10px 14px; font-size: 13.5px; line-height: 1.6;
+  color: var(--gold); background: #FAF5EA; border: 1px dashed #D9C79F; border-radius: 6px;
+}
+.cr-foot { margin-top: 30px; font-family: var(--mono); font-size: 11px; color: var(--paper-faint); }
+.crlink { display: inline-block; margin-top: 4px; font-size: 13.5px; color: var(--green); text-decoration: none; border-bottom: 1px solid currentColor; }
+.crlink:hover { color: var(--fg); }
+[data-theme="light"] .crlink { color: var(--forest); }
+@media (max-width: 700px) {
+  .cr-src { grid-template-columns: 1fr; gap: 6px; }
+  .cr-h { font-size: 23px; }
+}
