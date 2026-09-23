@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<!-- working draft, shared by link only: ask search engines not to list it -->
+<title>Philippine Vascular Plant Families</title>
+<meta name="description" content="Family descriptions, key paths and Philippine figures for the 294 vascular plant families of the Philippines.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Work+Sans:wght@300;400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="wordmark" href="#" data-home>PH<span>·</span>FLORA</a>
+  <div class="topstats" id="topstats"></div>
+  <div class="topsearch">
+    <label class="sr-only" for="q">Search families, genera or couplets</label>
+    <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="Search family, genus or couplet…">
+  </div>
+  <button type="button" class="ghost" id="about-btn">About this draft</button>
+</header>
+
+<main class="shell">
+
+  <nav class="rail" aria-label="Filters and family list">
+    <div class="facets">
+      <div class="facet">
+        <div class="facet-head">Description status</div>
+        <div class="chips" id="facet-status"></div>
+      </div>
+      <div class="facet">
+        <div class="facet-head">Group</div>
+        <div class="chips" id="facet-group"></div>
+      </div>
+      <div class="facet">
+        <div class="facet-head">Sort</div>
+        <div class="chips" id="facet-sort"></div>
+      </div>
+    </div>
+    <div class="rail-count" id="rail-count"></div>
+    <ul class="famlist" id="famlist"></ul>
+  </nav>
+
+  <section class="stage" id="stage" aria-live="polite">
+    <div class="loading">Loading the flora…</div>
+  </section>
+
+</main>
+
+<script src="js/app.js"></script>
+</body>
+</html>
