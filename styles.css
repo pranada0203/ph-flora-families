@@ -1087,6 +1087,7 @@ dialog.about::backdrop { background: rgba(8, 10, 6, 0.62); }
 .sptags .end    { background: #E3EDE6; color: #2F6B4F; }
 .sptags .intro  { background: #EDE9DE; color: #6A6253; }
 .sptags .nocdfp { background: #F6E7D2; color: #8A5A16; }
+.sptags .cdfponly { background: #E4E7F3; color: #3E4C8A; }
 .sprec { flex-shrink: 0; min-width: 62px; text-align: right; font-family: var(--mono); font-size: 11.5px; color: var(--paper-mute); }
 .spempty { padding: 14px 4px; font-size: 13px; color: var(--paper-mute); }
 
@@ -1118,7 +1119,11 @@ dialog.about::backdrop { background: rgba(8, 10, 6, 0.62); }
   .spmap { max-width: 260px; }
   .spfacts { grid-template-columns: 1fr; gap: 2px; }
   .spfacts dd { margin-bottom: 8px; }
-  .sptags .tag.nocdfp { display: none; }
+  /* phones: name and island count on the first line, the source tags wrap beneath */
+  .sphead { flex-wrap: wrap; row-gap: 5px; }
+  .spname { flex: 1 1 calc(100% - 80px); }
+  .sptags { order: 3; flex: 1 1 100%; flex-wrap: wrap; }
+  .sptags:empty { display: none; }
 }
 
 .spleft { min-width: 0; }

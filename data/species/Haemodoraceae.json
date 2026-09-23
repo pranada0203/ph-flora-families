@@ -1,1 +1,1 @@
-{"family":"Haemodoraceae","counts":{"species":0,"native":0,"endemic":0,"introduced":0,"cdfp_listed":0,"with_islands":0,"cdfp_only":1},"species":[]}
+{"family":"Haemodoraceae","counts":{"rows":1,"both":0,"kew_only":0,"cdfp_only":1,"kew":0,"cdfp":1,"merged":0,"endemic":0,"introduced":0,"with_islands":1},"species":[{"n":"Xiphidium caeruleum","au":"Aubl.","id":"cdfp-435","powo":"304977-2","s":"c","e":0,"i":0,"x":0,"dq":0,"lf":null,"rg":null,"c":"listed","kw":{"t":"nophi","powo":"304977-2"},"ci":["LUZON","MINDANAO"]}]}

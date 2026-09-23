@@ -322,7 +322,7 @@
     var spxT = el('span', 't');
     spxT.appendChild(el('span', 'k', 'SPECIES LAB · EXPERIMENTAL'));
     spxT.appendChild(el('span', 'h', 'Build a species list by island'));
-    spxT.appendChild(el('span', 'd', 'Every species Kew accepts for the Philippines, with CDFP’s islands: for example, all the species known only from Palawan. Filter, open, download.'));
+    spxT.appendChild(el('span', 'd', 'Kew’s and CDFP’s checklists side by side, with CDFP’s islands: for example, all the species known only from Palawan. Filter, open, download.'));
     spx.appendChild(spxT);
     spx.appendChild(el('span', 'arr', '→'));
     wrap.appendChild(spx);
@@ -659,10 +659,24 @@
   }
 
   /* ------------------------------------------------------------ species
-     Built by tools/build-species.js. The species list is Kew's World Checklist
-     of Vascular Plants; each species' island names come from CDFP (names only,
-     credited); GBIF records and photos are fetched live, here in the browser,
-     when a species is opened. One file per family, fetched on first use. */
+     Built by tools/build-species.js. The list combines Kew's World Checklist of
+     Vascular Plants with CDFP's accepted species, every row marked by source
+     (s: 'b' both, 'k' Kew only, 'c' CDFP only); each species' island names come
+     from CDFP (names only, credited); GBIF records and photos are fetched live,
+     here in the browser, when a species is opened. One file per family. */
+
+  var SOURCES = [['all', 'All'], ['b', 'In both'], ['k', 'Kew only'], ['c', 'CDFP only']];
+  var KEW_SAYS = {
+    nophi: 'Kew accepts this species but has no Philippine record of it',
+    none: 'Not in Kew’s checklist — perhaps described recently, or spelled differently',
+  };
+  function kewNote(s) {
+    var k = s.kw || {};
+    if (k.t === 'syn') return 'Kew treats it as a synonym of <em>' + esc(k.to) + '</em>, which Kew does not record for the Philippines';
+    if (k.t === 'status') return 'Kew lists the name, as ' + esc(k.st.toLowerCase()) + ', with no Philippine record';
+    return KEW_SAYS[k.t] || '';
+  }
+  function kewNotePlain(s) { return kewNote(s).replace(/<[^>]+>/g, ''); }
 
   var SPECIES = {};
   function loadSpecies(fam) {
@@ -800,17 +814,23 @@
     var right = el('div', 'spright');
     var facts = el('dl', 'spfacts');
     function fact(k, v) { if (v == null || v === '') return; facts.appendChild(el('dt', null, k)); var dd = el('dd'); dd.innerHTML = v; facts.appendChild(dd); }
-    fact('Status in the Philippines', s.i ? 'Introduced' : s.e ? '<strong>Endemic</strong> — native nowhere else' : 'Native');
+    fact('Status in the Philippines', s.s === 'c' ? 'No Kew status: Kew does not list it for the Philippines'
+      : (s.i ? 'Introduced' : s.e ? '<strong>Endemic</strong> — native nowhere else' : 'Native') + ' <span class="cred">— Kew</span>');
     if (s.x) fact('Note', 'Kew records it as extinct in the Philippines');
     if (s.dq) fact('Note', 'Kew marks its Philippine occurrence as doubtful');
     fact('Life form', s.lf ? esc(s.lf) : null);
     fact('Native range', s.rg ? esc(s.rg) : null);
     fact('Islands', s.ci && s.ci.length
       ? s.ci.map(function (t) { return '<button type="button" class="isl" data-t="' + esc(t) + '" title="Show the species of this family on ' + esc(titleCase(t)) + '">' + esc(titleCase(t)) + '</button>'; }).join(' · ') + ' <span class="cred">— CDFP</span>'
-      : (s.c === 'not listed' ? 'Not listed by CDFP, so no island record here' : 'CDFP gives no island for it'));
-    fact('CDFP', s.c === 'listed' ? 'Listed under this name'
-      : /^as /.test(s.c) ? 'Listed under the synonym <em>' + esc(s.c.slice(3)) + '</em>'
+      : (s.s === 'k' ? 'Not accepted by CDFP, so no island record here' : 'CDFP gives no island for it'));
+    fact('Source', s.s === 'b' ? 'In both Kew’s and CDFP’s checklists' : s.s === 'k' ? 'Kew only' : 'CDFP only');
+    if (s.s === 'c') fact('Kew', kewNote(s));
+    else fact('CDFP', s.c === 'listed' ? 'Accepted under this name'
+      : /^as /.test(s.c) ? 'Accepted under the name <em>' + esc(s.c.slice(3)) + '</em>'
+      : s.cl ? 'Not accepted: CDFP lists it as <strong>' + esc(s.cl) + '</strong>'
       : 'Not listed — a name to check');
+    if (s.cx) fact('CDFP also recognises', s.cx.map(function (n) { return '<em>' + esc(n) + '</em>'; }).join(', ') +
+      ', which Kew includes in this species. ' + plural(s.cx.length, 'Its', 'Their') + ' islands are included above.');
     right.appendChild(facts);
     if (onIsland) [].forEach.call(facts.querySelectorAll('button.isl'), function (b) {
       b.addEventListener('click', function () { onIsland(b.getAttribute('data-t')); });
@@ -834,7 +854,7 @@
 
     var links = el('div', 'splinks');
     function link(label, href) { var a = el('a', null, label); a.href = href; a.target = '_blank'; a.rel = 'noopener'; links.appendChild(a); return a; }
-    if (s.powo) link('Kew POWO', 'https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:' + s.powo);
+    if (s.powo) link(s.kw && s.kw.t === 'syn' ? 'Kew POWO (as ' + s.kw.to + ')' : 'Kew POWO', 'https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:' + s.powo);
     var gLink = link('Search GBIF', 'https://www.gbif.org/species/search?q=' + encodeURIComponent(s.n));
     var fp = BY_NAME[fam] && BY_NAME[fam].cdfp_url;
     if (fp) link('CDFP family page', fp);
@@ -928,7 +948,7 @@
     var b = el('div', 'labbanner');
     b.appendChild(el('span', 'tag', 'SPECIES LAB'));
     var d = el('div');
-    d.innerHTML = '<strong>Experimental.</strong> Built from Kew’s checklist, CDFP’s island names and live GBIF records. ' +
+    d.innerHTML = '<strong>Experimental.</strong> Kew’s and CDFP’s checklists combined, each name marked by source, with CDFP’s island names and live GBIF records. ' +
       'It is not part of the key or the paper, and no co-author has checked it.' + (extra ? ' ' + extra : '');
     b.appendChild(d);
     return b;
@@ -939,26 +959,27 @@
     var c = data.counts, sp = data.species;
     var lead = el('p', 'keyintro');
     if (!sp.length) {
-      lead.innerHTML = 'Kew’s World Checklist of Vascular Plants places no Philippine species in ' + esc(f.family) +
-        ' as this app defines it.' + (c.cdfp_only ? ' CDFP lists ' + c.cdfp_only + ' name' + (c.cdfp_only > 1 ? 's' : '') + ' here that Kew does not accept for the Philippines.' : '');
+      lead.innerHTML = 'Neither Kew nor CDFP accepts a Philippine species in ' + esc(f.family) + ' as this app defines it.';
       p.appendChild(lead);
       p.appendChild(speciesSources());
       return;
     }
-    lead.innerHTML = 'Kew’s World Checklist of Vascular Plants accepts <strong>' + num(c.species) + '</strong> ' +
-      plural(c.species, 'species') + ' of ' + esc(f.family) + ' (as this app defines the family) for the Philippines: ' + num(c.native) + ' native, <strong>' +
-      num(c.endemic) + '</strong> of them endemic' + (c.introduced ? ', and ' + num(c.introduced) + ' introduced' : '') + '. ' +
-      'Open a species for its islands, its GBIF records and photographs. ' +
+    lead.innerHTML = sourceSentence(c, esc(f.family) + ' (as this app defines the family)') +
+      (c.kew ? ' Kew counts ' + num(c.endemic) + ' of its ' + num(c.kew) + ' endemic' + (c.introduced ? ' and ' + num(c.introduced) + ' introduced' : '') + '.' : '') +
+      ' The family figures elsewhere on this page are CDFP’s (' + num(f.species) + ' species). ' +
       '<a href="#species">Search all Philippine species by island →</a>';
     p.appendChild(lead);
-    var cmp = el('p', 'keyintro');
-    cmp.innerHTML = 'Cross-check with CDFP, the source of this app’s family figures (' + num(f.species) + ' species): it lists ' +
-      num(c.cdfp_listed) + ' of Kew’s ' + num(c.species) + ', some under another name' +
-      (c.cdfp_only ? ', and ' + num(c.cdfp_only) + ' more that Kew does not accept for the Philippines' : '') +
-      '. Disagreements are worth a taxonomist’s look; neither list is assumed right.';
-    p.appendChild(cmp);
     speciesExplorer(p, sp, { family: f.family });
     p.appendChild(speciesSources());
+  }
+
+  /* The counts by source, as a sentence. There is deliberately no single total:
+     the rows are names from two classifications (docs/species.md). */
+  function sourceSentence(c, what) {
+    return '<strong>' + num(c.both) + '</strong> ' + plural(c.both, 'name') + ' for ' + what + ' ' + (c.both === 1 ? 'is' : 'are') + ' accepted by both Kew and CDFP, ' +
+      '<strong>' + num(c.kew_only) + '</strong> by Kew only and <strong>' + num(c.cdfp_only) + '</strong> by CDFP only' +
+      (c.merged ? '; ' + num(c.merged) + ' more CDFP ' + plural(c.merged, 'name is', 'names are') + ' shown inside the Kew species ' + (c.merged === 1 ? 'it belongs' : 'they belong') + ' to' : '') +
+      '. The two checklists classify some plants differently, so these are names to compare, not a species count.';
   }
 
   /* The filterable species list: used on a family's Species tab (ctx.family set)
@@ -971,11 +992,11 @@
     var byName = function (a, b) { return sortName(a).localeCompare(sortName(b)); };
     var STATUS = [['all', 'All', function () { return true; }],
       ['endemic', 'Endemic', function (s) { return s.e; }],
-      ['introduced', 'Introduced', function (s) { return s.i; }],
-      ['nocdfp', 'Not in CDFP', function (s) { return s.c === 'not listed'; }]];
+      ['introduced', 'Introduced', function (s) { return s.i; }]];
+    var srcOf = function (v) { return function (s) { return v === 'all' || s.s === v; }; };
     var MODES = [['any', 'Found on'], ['only', 'Only on'], ['also', 'Also elsewhere'], ['every', 'On all of these']];
     if (!state.spisl) state.spisl = [];
-    var filt = state.spf || 'all', sortBy = state.sps || 'az', mode = state.spmode || 'any';
+    var filt = state.spf === 'nocdfp' ? 'all' : (state.spf || 'all'), src = state.spsrc || 'all', sortBy = state.sps || 'az', mode = state.spmode || 'any';
     var famFilter = flora ? (state.spfam || '') : '';
     var PAGE = 200, shownMax = PAGE;
 
@@ -1024,7 +1045,10 @@
       row.appendChild(seg);
       return row;
     }
-    panel.appendChild(segmented('Status', STATUS.filter(function (s) { return s[0] === 'all' || sp.some(s[2]); })
+    panel.appendChild(segmented('Source', SOURCES.filter(function (s) { return s[0] === 'all' || sp.some(srcOf(s[0])); })
+      .map(function (s) { return [s[0], s[1], sp.filter(srcOf(s[0])).length]; }), src,
+      function (v) { src = v; state.spsrc = v; draw(true); }));
+    panel.appendChild(segmented('Kew status', STATUS.filter(function (s) { return s[0] === 'all' || sp.some(s[2]); })
       .map(function (s) { return [s[0], s[1], sp.filter(s[2]).length]; }), filt,
       function (v) { filt = v; state.spf = v; draw(true); }));
 
@@ -1139,7 +1163,7 @@
       var needle = q.value.trim().toLowerCase();
       var fn = STATUS.filter(function (x) { return x[0] === filt; })[0][2];
       var rows = sp.filter(function (s) {
-        return fn(s) && (!famFilter || s.f === famFilter) && islandTest(s) &&
+        return fn(s) && srcOf(src)(s) && (!famFilter || s.f === famFilter) && islandTest(s) &&
           (!needle || s.n.toLowerCase().indexOf(needle) !== -1 || (flora && s.f.toLowerCase().indexOf(needle) !== -1));
       });
       if (sortBy === 'isl') rows = rows.slice().sort(function (a, b) { return b.ci.length - a.ci.length || byName(a, b); });
@@ -1147,8 +1171,8 @@
       if (sortBy === 'fam') rows = rows.slice().sort(function (a, b) { return a.f.localeCompare(b.f) || byName(a, b); });
       if (sortBy === 'az') rows = rows.slice().sort(byName);
       current = rows;
-      count.innerHTML = rows.length === sp.length ? '<strong>' + num(sp.length) + '</strong> species'
-        : '<strong>' + num(rows.length) + '</strong> of ' + num(sp.length) + ' species' +
+      count.innerHTML = rows.length === sp.length ? '<strong>' + num(sp.length) + '</strong> names'
+        : '<strong>' + num(rows.length) + '</strong> of ' + num(sp.length) + ' names' +
           (flora ? ' in ' + num(Object.keys(rows.reduce(function (m, s) { m[s.f] = 1; return m; }, {})).length) + ' ' +
             plural(Object.keys(rows.reduce(function (m, s) { m[s.f] = 1; return m; }, {})).length, 'family', 'families') : '');
       dl.disabled = !rows.length;
@@ -1167,7 +1191,8 @@
         var tags = el('span', 'sptags');
         if (s.e) tags.appendChild(el('span', 'tag end', 'endemic'));
         if (s.i) tags.appendChild(el('span', 'tag intro', 'introduced'));
-        if (s.c === 'not listed') tags.appendChild(el('span', 'tag nocdfp', 'not in CDFP'));
+        if (s.s === 'k') tags.appendChild(el('span', 'tag nocdfp', s.cl ? 'Kew only · CDFP: ' + s.cl : 'Kew only'));
+        if (s.s === 'c') tags.appendChild(el('span', 'tag cdfponly', 'CDFP only'));
         b.appendChild(tags);
         b.appendChild(el('span', 'sprec', s.ci.length ? s.ci.length + ' ' + plural(s.ci.length, 'island') : '—'));
         b.addEventListener('click', function () {
@@ -1191,7 +1216,7 @@
         }
         list.appendChild(li);
       });
-      if (!rows.length) list.appendChild(el('li', 'spempty', 'No species match these filters.'));
+      if (!rows.length) list.appendChild(el('li', 'spempty', 'No names match these filters.'));
       more.textContent = '';
       if (rows.length > shownMax) {
         var mb = el('button', 'dlbtn', 'Show ' + num(Math.min(PAGE, rows.length - shownMax)) + ' more');
@@ -1210,18 +1235,22 @@
     dl.addEventListener('click', function () {
       var cell = function (v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
       var desc = [ctx.family || (famFilter || 'All Philippine species')];
+      if (src !== 'all') desc.push(SOURCES.filter(function (x) { return x[0] === src; })[0][1]);
       if (filt !== 'all') desc.push(STATUS.filter(function (x) { return x[0] === filt; })[0][1]);
       if (state.spisl.length) desc.push(MODES.filter(function (m) { return m[0] === mode; })[0][1] + ' ' + state.spisl.map(titleCase).join(' + '));
       if (q.value.trim()) desc.push('name contains "' + q.value.trim() + '"');
       var lines = [
-        ['# ' + desc.join(' · ') + ' — ' + current.length + ' species. Exported ' + new Date().toISOString().slice(0, 10) + ' from the PH·FLORA working draft (not for citation).'],
-        ['# Species and status: World Checklist of Vascular Plants, Royal Botanic Gardens, Kew (version 16, CC BY 3.0). Islands: Co’s Digital Flora of the Philippines (Pelser, Barcelona & Nickrent, 2011 onwards).'],
-        ['species', 'authors', 'family', 'status', 'islands (CDFP)', 'CDFP listing', 'Kew POWO'],
+        ['# ' + desc.join(' · ') + ' — ' + current.length + ' names. Exported ' + new Date().toISOString().slice(0, 10) + ' from the PH·FLORA working draft (not for citation). Names from two checklists, marked by source: not a species count.'],
+        ['# Names and Kew status: World Checklist of Vascular Plants, Royal Botanic Gardens, Kew (version 16, CC BY 3.0). Names and islands: Co’s Digital Flora of the Philippines (Pelser, Barcelona & Nickrent, 2011 onwards).'],
+        ['name', 'authors', 'family', 'source', 'Kew status', 'islands (CDFP)', 'CDFP', 'Kew', 'CDFP also recognises', 'Kew POWO'],
       ];
       current.forEach(function (s) {
-        lines.push([s.n, s.au, famOf(s), s.i ? 'introduced' : s.e ? 'endemic' : 'native',
+        lines.push([s.n, s.au, famOf(s), s.s === 'b' ? 'both' : s.s === 'k' ? 'Kew only' : 'CDFP only',
+          s.s === 'c' ? '' : s.i ? 'introduced' : s.e ? 'endemic' : 'native',
           s.ci.map(titleCase).join('; '),
-          s.c === 'listed' ? 'listed' : /^as /.test(s.c) ? 'listed as ' + s.c.slice(3) : 'not listed',
+          s.s === 'k' ? (s.cl ? 'not accepted: ' + s.cl : 'not listed') : /^as /.test(s.c) ? 'accepted as ' + s.c.slice(3) : 'accepted',
+          s.s === 'c' ? kewNotePlain(s) : 'accepted for the Philippines',
+          (s.cx || []).join('; '),
           s.powo ? 'https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:' + s.powo : '']);
       });
       var csv = '﻿' + lines.map(function (r) { return r.map(cell).join(','); }).join('\r\n');
@@ -1273,12 +1302,10 @@
       p.textContent = '';
       p.appendChild(labBanner());
       var lead = el('p', 'keyintro');
-      var end = sp.filter(function (s) { return s.e; }).length, intro = sp.filter(function (s) { return s.i; }).length;
-      lead.innerHTML = 'Kew’s World Checklist of Vascular Plants accepts <strong>' + num(T.species || sp.length) + '</strong> species for the ' +
-        'Philippines. <strong>' + num(sp.length) + '</strong> of them fall in this app’s ' + DATA.families.length + ' families' +
-        (T.unplaced ? ' (the other ' + T.unplaced + ' belong to families CDFP does not recognise)' : '') + ': <strong>' + num(end) +
-        '</strong> endemic and ' + num(intro) + ' introduced. Choose islands below to build a list, for example every species ' +
-        'known <em>only</em> from Palawan, and download it.';
+      lead.innerHTML = 'The Species lab combines Kew’s World Checklist of Vascular Plants with the species CDFP accepts. ' +
+        sourceSentence(T, 'the Philippines') +
+        (T.kew_unplaced ? ' (' + T.kew_unplaced + ' more Kew ' + plural(T.kew_unplaced, 'species') + ' belong to families CDFP does not recognise, and ' + (T.kew_unplaced === 1 ? 'is' : 'are') + ' left out.)' : '') +
+        ' Choose islands below to build a list, for example every species known <em>only</em> from Palawan, and download it.';
       p.appendChild(lead);
       speciesExplorer(p, sp, { family: null });
       p.appendChild(speciesSources());
@@ -1288,8 +1315,8 @@
   function speciesSources() {
     var s = el('div', 'srcline');
     var src = SPX_META || {};
-    s.innerHTML = 'Species list: ' + esc(src.wcvp || 'World Checklist of Vascular Plants, Royal Botanic Gardens, Kew (version 16, CC BY 3.0)') + '. ' +
-      'Islands: ' + esc(src.cdfp || 'Co’s Digital Flora of the Philippines') + ' ' +
+    s.innerHTML = 'Kew: ' + esc(src.wcvp || 'World Checklist of Vascular Plants, Royal Botanic Gardens, Kew (version 16, CC BY 3.0)') + '. ' +
+      'CDFP: ' + esc(src.cdfp || 'Co’s Digital Flora of the Philippines') + ' ' +
       'Records and photographs: fetched live from <a href="https://www.gbif.org" target="_blank" rel="noopener">GBIF.org</a>, each photograph ' +
       'credited to its owner under its own licence; they are shown as published and have not been checked. ' +
       '<a href="#credits">All sources and terms →</a>';
@@ -2009,7 +2036,7 @@
     var parts = h.split('/');
     var fam = parts[0];
     if (!BY_NAME[fam]) { state.family = null; return; }
-    if (fam !== state.family) { state.route = 0; state.spq = ''; state.spf = 'all'; state.spopen = null; }
+    if (fam !== state.family) { state.route = 0; state.spq = ''; state.spf = 'all'; state.spsrc = 'all'; state.spopen = null; }
     state.family = fam;
     state.tab = parts[1] || 'description';
   }
@@ -2069,8 +2096,8 @@
         'another region, or has another problem, the page says so in a banner above the description.',
       '<strong>Conservation figures are CDFP’s</strong>, as CDFP states them. They are not our assessments and not an official list: for ' +
         'that, consult the current DENR Administrative Order and the IUCN Red List.',
-      '<strong>The Species lab is experimental.</strong> It joins Kew’s checklist to CDFP’s island names automatically, and the two ' +
-        'sources often disagree about how many species a family has. No co-author has checked it.',
+      '<strong>The Species lab is experimental.</strong> It combines Kew’s and CDFP’s checklists automatically, and the two often classify ' +
+        'the same plants differently, so its rows are names to compare, not a count of species. No co-author has checked it.',
       '<strong>GBIF records and photographs</strong> are shown as their publishers put them on GBIF. They have not been checked; some are ' +
         'misidentified, and some points are misplaced or deliberately blurred.',
       '<strong>The maps are schematic.</strong> Island shapes are simplified from Natural Earth, and the scale bar is exact only near 12.5°N. ' +
@@ -2097,7 +2124,8 @@
     source('Co’s Digital Flora of the Philippines (CDFP)',
       esc(ref('CDFP').citation) + '. ' + ext('https://www.philippineplants.org') + '. The ' + num(t.families) + ' families this app is built on, and ' +
         'every Philippine figure on a family page: species, endemics, genera, islands, elevations and conservation listings, counted from ' +
-        'CDFP’s species records. In the Species lab, the island names CDFP gives for each species. CDFP’s own text, notes and photographs are not reproduced.',
+        'CDFP’s species records. In the Species lab: the names CDFP accepts, the island names it gives for each, and which of its other lists ' +
+        '(cultivated, excluded, possibly present, uncertain) holds a name Kew accepts. CDFP’s own text, notes, endemic flags and photographs are not reproduced.',
       acc ? 'Accessed ' + esc(acc) : '',
       'CDFP’s content belongs to its editors and contributors. Figures are our counts of its records; island names are shown per species with this credit.');
     source('Copeland (1908)',
@@ -2120,8 +2148,9 @@
       'Published papers, cited.');
     source('World Checklist of Vascular Plants (WCVP)',
       'Royal Botanic Gardens, Kew. ' + ext('https://powo.science.kew.org', 'powo.science.kew.org') + '. In the Species lab only: the species ' +
-        'accepted for the Philippines, their authors, whether native, endemic or introduced, life form, and the link to each species on POWO. ' +
-        '<em>Changed by this app:</em> filtered to the Philippines and each species placed into one of CDFP’s families.',
+        'accepted for the Philippines, their authors, whether native, endemic or introduced, life form, and the link to each species on POWO; ' +
+        'for names only CDFP accepts, what Kew does with the name. <em>Changed by this app:</em> filtered to the Philippines, each species placed ' +
+        'into one of CDFP’s families, and combined with CDFP’s list.',
       'Version 16, extracted 4 June 2026',
       ext('https://creativecommons.org/licenses/by/3.0/', 'Creative Commons Attribution 3.0') + ' (CC BY 3.0).');
     source('GBIF',
@@ -2263,9 +2292,10 @@
     ]);
 
     section('The Species lab (experimental)', [
-      para('The species list is Kew’s <strong>World Checklist of Vascular Plants</strong> (version 16, CC BY 3.0): every species it accepts for the ' +
-        'Philippines, native or introduced. Island names come from <strong>Co’s Digital Flora of the Philippines</strong> (names only, ' +
-        'credited on every list), and each species says whether CDFP lists it. <strong>GBIF</strong> records and photographs are fetched ' +
+      para('The list combines Kew’s <strong>World Checklist of Vascular Plants</strong> (version 16, CC BY 3.0) with the species accepted by ' +
+        '<strong>Co’s Digital Flora of the Philippines</strong>, and marks every name: in both, Kew only, or CDFP only. Kew-only names say when ' +
+        'CDFP lists them as cultivated, excluded or possibly present; CDFP-only names say what Kew does with them. Island names come from CDFP ' +
+        '(names only, credited on every list). <strong>GBIF</strong> records and photographs are fetched ' +
         'live when a species is opened: herbarium specimens by default, field observations on request. None of it has been checked, ' +
         'and GBIF records include misidentifications and misplaced points.')
     ]);

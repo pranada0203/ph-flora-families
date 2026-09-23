@@ -1,1 +1,1 @@
-{"family":"Muntingiaceae","counts":{"species":0,"native":0,"endemic":0,"introduced":0,"cdfp_listed":0,"with_islands":0,"cdfp_only":1},"species":[]}
+{"family":"Muntingiaceae","counts":{"rows":1,"both":0,"kew_only":0,"cdfp_only":1,"kew":0,"cdfp":1,"merged":0,"endemic":0,"introduced":0,"with_islands":1},"species":[{"n":"Muntingia calabura","au":"L.","id":"cdfp-540","powo":"320779-2","s":"c","e":0,"i":0,"x":0,"dq":0,"lf":null,"rg":null,"c":"listed","kw":{"t":"nophi","powo":"320779-2"},"ci":["LUZON","MINDANAO","MINDORO","PALAWAN","SIARGAO"]}]}
