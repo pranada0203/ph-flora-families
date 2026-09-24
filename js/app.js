@@ -1074,7 +1074,8 @@
     // distribution - islands (from CDFP) and how to match them
     var islCount = {};
     sp.forEach(function (s) { s.ci.forEach(function (t) { islCount[t] = (islCount[t] || 0) + 1; }); });
-    var islands = Object.keys(islCount).sort(function (a, b) { return islCount[b] - islCount[a] || a.localeCompare(b); });
+    // A–Z by the name shown, like the family list; each option still carries its count
+    var islands = Object.keys(islCount).sort(function (a, b) { return titleCase(a).localeCompare(titleCase(b)); });
     var r3 = el('div', 'fr fdist');
     r3.appendChild(el('span', 'flabel', 'Islands'));
     var distBox = el('div', 'fdistbox');
@@ -1370,7 +1371,7 @@
     return n;
   }
   function titleCase(tok) {
-    return tok.toLowerCase().replace(/(^|[\s(’'-])([a-z])/g, function (m, a, b) { return a + b.toUpperCase(); })
+    return tok.toLowerCase().replace(/(^|[\s(-])([a-z])/g, function (m, a, b) { return a + b.toUpperCase(); })
       .replace(/\bIsls\b/, 'Islands').replace(/^Ncr$/, 'NCR (Metro Manila)');
   }
   /* Sequential green, light to deep, on the square root of the share of the
